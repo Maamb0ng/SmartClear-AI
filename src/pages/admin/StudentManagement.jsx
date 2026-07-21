@@ -1,36 +1,40 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
 } from "react";
-import { motion } from "framer-motion";
+
+import {
+  AnimatePresence,
+  motion,
+} from "framer-motion";
 
 import Swal from "sweetalert2";
+
 import AdminLayout from "../../layouts/AdminLayout";
 
 import campusImage from "../../assets/cctc-campus.png";
 import schoolLogo from "../../assets/cctc-logo.jpg";
-import { supabase } from "../../services/supabase";
 
 import {
-  FaSearch,
-  FaUserGraduate,
-  FaEdit,
-  FaSave,
+  supabase,
+} from "../../services/supabase";
+
+import {
   FaCheckCircle,
-  FaSyncAlt,
+  FaChevronRight,
   FaExclamationTriangle,
+  FaFilter,
+  FaGraduationCap,
+  FaIdCard,
   FaLayerGroup,
+  FaSave,
+  FaSearch,
+  FaSyncAlt,
+  FaUserGraduate,
+  FaUsers,
 } from "react-icons/fa";
-
-import {
-  getSubjects,
-  getAdvisers,
-  getStudentSubjects,
-  saveStudentSubjects,
-  getStudentAdviser,
-  saveStudentAdviser,
-} from "../../services/studentService";
 
 const YEAR_ORDER = {
   "1st Year": 1,
@@ -39,38 +43,104 @@ const YEAR_ORDER = {
   "4th Year": 4,
 };
 
-const normalizeValue = (value) =>
+const normalizeValue = (
+  value
+) =>
   String(value || "")
     .trim()
     .toUpperCase();
 
+const getStatusClass = (
+  status
+) => {
+  if (status === "Active") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (status === "Inactive") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  return "border-amber-200 bg-amber-50 text-amber-700";
+};
+
+const getInitials = (
+  name
+) => {
+  const words = String(
+    name || "Student"
+  )
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (words.length === 0) {
+    return "ST";
+  }
+
+  if (words.length === 1) {
+    return words[0]
+      .slice(0, 2)
+      .toUpperCase();
+  }
+
+  return `${words[0][0]}${
+    words[
+      words.length - 1
+    ][0]
+  }`.toUpperCase();
+};
+
 function StudentManagement() {
-  const [students, setStudents] =
-    useState([]);
+  const [
+    students,
+    setStudents,
+  ] = useState([]);
 
-  const [subjects, setSubjects] =
-    useState([]);
+  const [
+    sections,
+    setSections,
+  ] = useState([]);
 
-  const [advisers, setAdvisers] =
-    useState([]);
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-  const [sections, setSections] =
-    useState([]);
+  const [
+    refreshing,
+    setRefreshing,
+  ] = useState(false);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [
+    saving,
+    setSaving,
+  ] = useState(false);
 
-  const [saving, setSaving] =
-    useState(false);
+  const [
+    activating,
+    setActivating,
+  ] = useState(false);
 
-  const [activating, setActivating] =
-    useState(false);
+  const [
+    search,
+    setSearch,
+  ] = useState("");
 
-  const [refreshing, setRefreshing] =
-    useState(false);
+  const [
+    statusFilter,
+    setStatusFilter,
+  ] = useState("All");
 
-  const [search, setSearch] =
-    useState("");
+  const [
+    courseFilter,
+    setCourseFilter,
+  ] = useState("All");
+
+  const [
+    yearFilter,
+    setYearFilter,
+  ] = useState("All");
 
   const [
     selectedStudent,
@@ -78,248 +148,444 @@ function StudentManagement() {
   ] = useState(null);
 
   const [
-    selectedSubjects,
-    setSelectedSubjects,
-  ] = useState([]);
-
-  const [
-    selectedAdviser,
-    setSelectedAdviser,
-  ] = useState("");
-
-  const [
     selectedSectionId,
     setSelectedSectionId,
   ] = useState("");
 
-  const [form, setForm] = useState({
-    course: "",
-    year_level: "",
-    section: "",
-    semester: "",
-    school_year: "",
-  });
-
   /*
-  =====================================
-  LOAD STUDENTS AND SETTINGS
-  =====================================
+  |--------------------------------------------------------------------------
+  | LOAD STUDENTS AND OFFICIAL SECTIONS
+  |--------------------------------------------------------------------------
   */
 
-  const loadData = async () => {
-    try {
-      const [
-        studentResult,
-        subjectData,
-        adviserData,
-        sectionResult,
-      ] = await Promise.all([
-        supabase
-          .from("users")
-          .select(`
-            id,
-            auth_id,
-            student_id,
-            full_name,
-            email,
-            role,
-            status,
-            course,
-            year_level,
-            section,
-            semester,
-            school_year,
-            section_id
-          `)
-          .eq("role", "Student")
-          .order("full_name", {
-            ascending: true,
-          }),
-
-        getSubjects(),
-
-        getAdvisers(),
-
-        supabase
-          .from("sections")
-          .select(`
-            id,
-            course_id,
-            course,
-            year_level,
-            block_code,
-            semester,
-            school_year,
-            is_active,
-
-            course_record:courses!sections_course_id_fkey (
-              id,
-              course_code,
-              course_name,
-              is_active
-            )
-          `)
-          .eq("is_active", true),
-      ]);
-
-      if (studentResult.error) {
-        throw studentResult.error;
-      }
-
-      if (sectionResult.error) {
-        throw sectionResult.error;
-      }
-
-      const formattedSections = (
-        sectionResult.data || []
-      )
-        .map((sectionRecord) => {
-          const courseRecord =
-            Array.isArray(
-              sectionRecord.course_record
-            )
-              ? sectionRecord
-                  .course_record[0]
-              : sectionRecord.course_record;
-
-          return {
-            ...sectionRecord,
-
-            courseCode:
-              courseRecord?.course_code ||
-              sectionRecord.course ||
-              "Unassigned",
-
-            courseName:
-              courseRecord?.course_name ||
-              "",
-          };
-        })
-        .sort((first, second) => {
-          const courseComparison =
-            first.courseCode.localeCompare(
-              second.courseCode
+  const loadData =
+    useCallback(
+      async ({
+        refresh = false,
+      } = {}) => {
+        try {
+          if (refresh) {
+            setRefreshing(
+              true
             );
-
-          if (courseComparison !== 0) {
-            return courseComparison;
+          } else {
+            setLoading(
+              true
+            );
           }
 
-          const yearComparison =
-            (YEAR_ORDER[
-              first.year_level
-            ] || 99) -
-            (YEAR_ORDER[
-              second.year_level
-            ] || 99);
+          const [
+            studentResult,
+            sectionResult,
+          ] =
+            await Promise.all([
+              supabase
+                .from("users")
+                .select(`
+                  id,
+                  student_id,
+                  full_name,
+                  email,
+                  role,
+                  status,
+                  course,
+                  year_level,
+                  section,
+                  semester,
+                  school_year,
+                  section_id
+                `)
+                .eq(
+                  "role",
+                  "Student"
+                )
+                .order(
+                  "full_name",
+                  {
+                    ascending:
+                      true,
+                  }
+                ),
 
-          if (yearComparison !== 0) {
-            return yearComparison;
-          }
+              supabase
+                .from(
+                  "sections"
+                )
+                .select(`
+                  id,
+                  course_id,
+                  course,
+                  year_level,
+                  block_code,
+                  semester,
+                  school_year,
+                  is_active,
 
-          const semesterComparison = (
-            first.semester || ""
-          ).localeCompare(
-            second.semester || ""
-          );
+                  course_record:courses!sections_course_id_fkey (
+                    id,
+                    course_code,
+                    course_name,
+                    is_active
+                  )
+                `)
+                .eq(
+                  "is_active",
+                  true
+                ),
+            ]);
 
           if (
-            semesterComparison !== 0
+            studentResult.error
           ) {
-            return semesterComparison;
+            throw studentResult.error;
           }
 
-          return (
-            first.block_code || ""
-          ).localeCompare(
-            second.block_code || "",
-            undefined,
-            {
-              numeric: true,
+          if (
+            sectionResult.error
+          ) {
+            throw sectionResult.error;
+          }
+
+          const formattedSections =
+            (
+              sectionResult.data ||
+              []
+            )
+              .map(
+                (
+                  sectionRecord
+                ) => {
+                  const courseRecord =
+                    Array.isArray(
+                      sectionRecord.course_record
+                    )
+                      ? sectionRecord
+                          .course_record[0]
+                      : sectionRecord.course_record;
+
+                  return {
+                    ...sectionRecord,
+
+                    courseCode:
+                      courseRecord
+                        ?.course_code ||
+                      sectionRecord.course ||
+                      "Unassigned",
+
+                    courseName:
+                      courseRecord
+                        ?.course_name ||
+                      "",
+                  };
+                }
+              )
+              .sort(
+                (
+                  first,
+                  second
+                ) => {
+                  const courseComparison =
+                    first.courseCode.localeCompare(
+                      second.courseCode
+                    );
+
+                  if (
+                    courseComparison !==
+                    0
+                  ) {
+                    return courseComparison;
+                  }
+
+                  const yearComparison =
+                    (YEAR_ORDER[
+                      first.year_level
+                    ] || 99) -
+                    (YEAR_ORDER[
+                      second.year_level
+                    ] || 99);
+
+                  if (
+                    yearComparison !==
+                    0
+                  ) {
+                    return yearComparison;
+                  }
+
+                  const semesterComparison =
+                    String(
+                      first.semester ||
+                        ""
+                    ).localeCompare(
+                      String(
+                        second.semester ||
+                          ""
+                      )
+                    );
+
+                  if (
+                    semesterComparison !==
+                    0
+                  ) {
+                    return semesterComparison;
+                  }
+
+                  return String(
+                    first.block_code ||
+                      ""
+                  ).localeCompare(
+                    String(
+                      second.block_code ||
+                        ""
+                    ),
+                    undefined,
+                    {
+                      numeric:
+                        true,
+                    }
+                  );
+                }
+              );
+
+          const nextStudents =
+            studentResult.data ||
+            [];
+
+          setStudents(
+            nextStudents
+          );
+
+          setSections(
+            formattedSections
+          );
+
+          setSelectedStudent(
+            (
+              current
+            ) => {
+              if (
+                !current?.id
+              ) {
+                return current;
+              }
+
+              return (
+                nextStudents.find(
+                  (
+                    student
+                  ) =>
+                    student.id ===
+                    current.id
+                ) ||
+                null
+              );
             }
           );
-        });
+        } catch (
+          error
+        ) {
+          console.error(
+            "Load student management error:",
+            error
+          );
 
-      setStudents(
-        studentResult.data || []
-      );
+          await Swal.fire({
+            icon:
+              "error",
+            title:
+              "Unable to Load Student Management",
+            text:
+              error?.message ||
+              "An unexpected error occurred while loading students and sections.",
+            confirmButtonColor:
+              "#2563eb",
+          });
+        } finally {
+          setLoading(
+            false
+          );
 
-      setSubjects(subjectData || []);
-      setAdvisers(adviserData || []);
-      setSections(formattedSections);
-    } catch (error) {
-      console.error(
-        "Load student management error:",
-        error
-      );
-
-      Swal.fire({
-        icon: "error",
-        title: "Unable to Load Data",
-        text:
-          error?.message ||
-          "An unexpected error occurred.",
-      });
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+          setRefreshing(
+            false
+          );
+        }
+      },
+      []
+    );
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [
+    loadData,
+  ]);
 
   /*
-  =====================================
-  FILTER STUDENTS
-  =====================================
+  |--------------------------------------------------------------------------
+  | DERIVED DATA
+  |--------------------------------------------------------------------------
   */
+
+  const statistics =
+    useMemo(() => {
+      return {
+        total:
+          students.length,
+
+        active:
+          students.filter(
+            (
+              student
+            ) =>
+              student.status ===
+              "Active"
+          ).length,
+
+        pending:
+          students.filter(
+            (
+              student
+            ) =>
+              student.status !==
+                "Active" &&
+              student.status !==
+                "Inactive"
+          ).length,
+
+        unassigned:
+          students.filter(
+            (
+              student
+            ) =>
+              !student.section_id
+          ).length,
+      };
+    }, [
+      students,
+    ]);
+
+  const courseOptions =
+    useMemo(() => {
+      return [
+        ...new Set(
+          students
+            .map(
+              (
+                student
+              ) =>
+                student.course
+            )
+            .filter(Boolean)
+        ),
+      ].sort();
+    }, [
+      students,
+    ]);
+
+  const yearOptions =
+    useMemo(() => {
+      return [
+        ...new Set(
+          students
+            .map(
+              (
+                student
+              ) =>
+                student.year_level
+            )
+            .filter(Boolean)
+        ),
+      ].sort(
+        (
+          first,
+          second
+        ) =>
+          (YEAR_ORDER[
+            first
+          ] || 99) -
+          (YEAR_ORDER[
+            second
+          ] || 99)
+      );
+    }, [
+      students,
+    ]);
 
   const filteredStudents =
     useMemo(() => {
-      const keyword = search
-        .trim()
-        .toLowerCase();
+      const keyword =
+        search
+          .trim()
+          .toLowerCase();
 
       return students.filter(
-        (student) => {
-          return (
+        (
+          student
+        ) => {
+          const searchable =
+            [
+              student.full_name,
+              student.student_id,
+              student.email,
+              student.course,
+              student.year_level,
+              student.section,
+              student.semester,
+              student.school_year,
+            ]
+              .filter(Boolean)
+              .join(" ")
+              .toLowerCase();
+
+          const matchesSearch =
             !keyword ||
-            (
-              student.full_name || ""
-            )
-              .toLowerCase()
-              .includes(keyword) ||
-            (
-              student.student_id || ""
-            )
-              .toLowerCase()
-              .includes(keyword) ||
-            (student.email || "")
-              .toLowerCase()
-              .includes(keyword) ||
-            (student.course || "")
-              .toLowerCase()
-              .includes(keyword) ||
-            (student.section || "")
-              .toLowerCase()
-              .includes(keyword)
+            searchable.includes(
+              keyword
+            );
+
+          const matchesStatus =
+            statusFilter ===
+              "All" ||
+            (statusFilter ===
+              "Unassigned" &&
+              !student.section_id) ||
+            (statusFilter !==
+              "Unassigned" &&
+              student.status ===
+                statusFilter);
+
+          const matchesCourse =
+            courseFilter ===
+              "All" ||
+            student.course ===
+              courseFilter;
+
+          const matchesYear =
+            yearFilter ===
+              "All" ||
+            student.year_level ===
+              yearFilter;
+
+          return (
+            matchesSearch &&
+            matchesStatus &&
+            matchesCourse &&
+            matchesYear
           );
         }
       );
-    }, [students, search]);
-
-  /*
-  =====================================
-  SELECTED OFFICIAL SECTION
-  =====================================
-  */
+    }, [
+      students,
+      search,
+      statusFilter,
+      courseFilter,
+      yearFilter,
+    ]);
 
   const selectedOfficialSection =
     useMemo(() => {
       return sections.find(
-        (sectionRecord) =>
+        (
+          sectionRecord
+        ) =>
           sectionRecord.id ===
           selectedSectionId
       );
@@ -328,723 +594,902 @@ function StudentManagement() {
       selectedSectionId,
     ]);
 
-  /*
-  =====================================
-  MATCH SUBMITTED INFORMATION
-  =====================================
-  */
-
-  const findMatchingSection = (
-    student
-  ) => {
-    if (!student) {
-      return null;
-    }
-
-    const matchingSections =
-      sections.filter(
-        (sectionRecord) => {
-          return (
-            normalizeValue(
-              sectionRecord.courseCode
-            ) ===
-              normalizeValue(
-                student.course
-              ) &&
-            normalizeValue(
-              sectionRecord.year_level
-            ) ===
-              normalizeValue(
-                student.year_level
-              ) &&
-            normalizeValue(
-              sectionRecord.block_code
-            ) ===
-              normalizeValue(
-                student.section
-              ) &&
-            normalizeValue(
-              sectionRecord.school_year
-            ) ===
-              normalizeValue(
-                student.school_year
-              ) &&
-            normalizeValue(
-              sectionRecord.semester
-            ) ===
-              normalizeValue(
-                student.semester
-              )
-          );
-        }
-      );
-
-    if (
-      matchingSections.length === 1
-    ) {
-      return matchingSections[0];
-    }
-
-    return null;
-  };
-
-  /*
-  =====================================
-  OPEN STUDENT
-  =====================================
-  */
-
-  const openStudent = async (
-    student
-  ) => {
-    try {
-      setSelectedStudent(student);
-
-      setForm({
-        course: student.course || "",
-        year_level:
-          student.year_level || "",
-        section:
-          student.section || "",
-        semester:
-          student.semester || "",
-        school_year:
-          student.school_year || "",
-      });
-
-      let officialSectionId =
-        student.section_id || "";
-
-      if (!officialSectionId) {
-        const automaticMatch =
-          findMatchingSection(student);
-
-        if (automaticMatch) {
-          officialSectionId =
-            automaticMatch.id;
-        }
+  const currentOfficialSection =
+    useMemo(() => {
+      if (
+        !selectedStudent
+          ?.section_id
+      ) {
+        return null;
       }
 
-      setSelectedSectionId(
-        officialSectionId
+      return (
+        sections.find(
+          (
+            sectionRecord
+          ) =>
+            sectionRecord.id ===
+            selectedStudent.section_id
+        ) ||
+        null
       );
+    }, [
+      sections,
+      selectedStudent,
+    ]);
 
-      const [
-        assignedSubjects,
-        adviser,
-      ] = await Promise.all([
-        getStudentSubjects(
-          student.id
+  const findMatchingSection =
+    useCallback(
+      (
+        student
+      ) => {
+        if (!student) {
+          return null;
+        }
+
+        const matches =
+          sections.filter(
+            (
+              sectionRecord
+            ) =>
+              normalizeValue(
+                sectionRecord.courseCode
+              ) ===
+                normalizeValue(
+                  student.course
+                ) &&
+              normalizeValue(
+                sectionRecord.year_level
+              ) ===
+                normalizeValue(
+                  student.year_level
+                ) &&
+              normalizeValue(
+                sectionRecord.block_code
+              ) ===
+                normalizeValue(
+                  student.section
+                ) &&
+              normalizeValue(
+                sectionRecord.school_year
+              ) ===
+                normalizeValue(
+                  student.school_year
+                ) &&
+              normalizeValue(
+                sectionRecord.semester
+              ) ===
+                normalizeValue(
+                  student.semester
+                )
+          );
+
+        return matches.length ===
+          1
+          ? matches[0]
+          : null;
+      },
+      [
+        sections,
+      ]
+    );
+
+  const automaticMatch =
+    useMemo(
+      () =>
+        findMatchingSection(
+          selectedStudent
         ),
-
-        getStudentAdviser(
-          student.id
-        ),
-      ]);
-
-      setSelectedSubjects(
-        assignedSubjects || []
-      );
-
-      setSelectedAdviser(
-        adviser || ""
-      );
-    } catch (error) {
-      console.error(
-        "Open student error:",
-        error
-      );
-
-      Swal.fire({
-        icon: "error",
-        title:
-          "Unable to Load Student",
-        text:
-          error?.message ||
-          "Unable to load the selected student.",
-      });
-    }
-  };
+      [
+        findMatchingSection,
+        selectedStudent,
+      ]
+    );
 
   /*
-  =====================================
-  OFFICIAL SECTION CHANGE
-  =====================================
+  |--------------------------------------------------------------------------
+  | STUDENT SELECTION
+  |--------------------------------------------------------------------------
   */
 
-  const handleSectionChange = (
-    event
+  const openStudent = (
+    student
   ) => {
-    const sectionId =
-      event.target.value;
-
-    setSelectedSectionId(sectionId);
-
-    const officialSection =
-      sections.find(
-        (sectionRecord) =>
-          sectionRecord.id === sectionId
-      );
-
-    if (!officialSection) {
-      return;
-    }
-
-    setForm({
-      course:
-        officialSection.courseCode,
-
-      year_level:
-        officialSection.year_level ||
-        "",
-
-      section:
-        officialSection.block_code ||
-        "",
-
-      semester:
-        officialSection.semester ||
-        "",
-
-      school_year:
-        officialSection.school_year ||
-        "",
-    });
-  };
-
-  /*
-  =====================================
-  SUBJECT SELECTION
-  =====================================
-  */
-
-  const toggleSubject = (
-    subjectId
-  ) => {
-    setSelectedSubjects(
-      (previousSubjects) => {
-        if (
-          previousSubjects.includes(
-            subjectId
+    const matchedSection =
+      student.section_id
+        ? sections.find(
+            (
+              sectionRecord
+            ) =>
+              sectionRecord.id ===
+              student.section_id
           )
-        ) {
-          return previousSubjects.filter(
-            (id) => id !== subjectId
+        : findMatchingSection(
+            student
           );
-        }
-
-        return [
-          ...previousSubjects,
-          subjectId,
-        ];
-      }
-    );
-  };
-
-  /*
-  =====================================
-  UPDATE LOCAL STUDENT
-  =====================================
-  */
-
-  const updateLocalStudent = (
-    updatedValues
-  ) => {
-    setStudents(
-      (previousStudents) =>
-        previousStudents.map(
-          (student) =>
-            student.id ===
-            selectedStudent.id
-              ? {
-                  ...student,
-                  ...updatedValues,
-                }
-              : student
-        )
-    );
 
     setSelectedStudent(
-      (previousStudent) => ({
-        ...previousStudent,
-        ...updatedValues,
-      })
+      student
+    );
+
+    setSelectedSectionId(
+      matchedSection?.id ||
+        ""
     );
   };
 
+  const clearSelection =
+    () => {
+      setSelectedStudent(
+        null
+      );
+
+      setSelectedSectionId(
+        ""
+      );
+    };
+
   /*
-  =====================================
-  SAVE OFFICIAL ASSIGNMENT
-  =====================================
+  |--------------------------------------------------------------------------
+  | LOCAL STATE UPDATE
+  |--------------------------------------------------------------------------
   */
 
-  const handleSave = async () => {
-    if (!selectedStudent) {
-      return;
-    }
+  const updateLocalStudent =
+    (
+      studentId,
+      values
+    ) => {
+      setStudents(
+        (
+          current
+        ) =>
+          current.map(
+            (
+              student
+            ) =>
+              student.id ===
+              studentId
+                ? {
+                    ...student,
+                    ...values,
+                  }
+                : student
+          )
+      );
 
-    if (!selectedSectionId) {
-      Swal.fire({
-        icon: "warning",
-        title:
-          "Official Class Required",
-        text:
-          "Please assign the student to an official course, year level, semester, school year, and block.",
-      });
+      setSelectedStudent(
+        (
+          current
+        ) =>
+          current?.id ===
+          studentId
+            ? {
+                ...current,
+                ...values,
+              }
+            : current
+      );
+    };
 
-      return;
-    }
+  /*
+  |--------------------------------------------------------------------------
+  | SAVE OR ACTIVATE
+  |--------------------------------------------------------------------------
+  */
 
-    if (!selectedOfficialSection) {
-      Swal.fire({
-        icon: "error",
-        title:
-          "Invalid Class Assignment",
-        text:
-          "The selected official class could not be found.",
-      });
-
-      return;
-    }
-
-    try {
-      setSaving(true);
-
-      const studentUpdate = {
-        section_id:
-          selectedOfficialSection.id,
-
-        course:
-          selectedOfficialSection
-            .courseCode,
-
-        year_level:
-          selectedOfficialSection
-            .year_level,
-
-        section:
-          selectedOfficialSection
-            .block_code,
-
-        semester:
-          selectedOfficialSection
-            .semester,
-
-        school_year:
-          selectedOfficialSection
-            .school_year,
-      };
-
-      const {
-        error: updateError,
-      } = await supabase
-        .from("users")
-        .update(studentUpdate)
-        .eq(
-          "id",
-          selectedStudent.id
-        );
-
-      if (updateError) {
-        throw updateError;
+  const saveOfficialAssignment =
+    async ({
+      activate = false,
+    } = {}) => {
+      if (
+        !selectedStudent
+      ) {
+        return;
       }
 
-      /*
-      Existing student subject and
-      adviser functions are retained.
-      */
+      if (
+        !selectedOfficialSection
+      ) {
+        await Swal.fire({
+          icon:
+            "warning",
+          title:
+            "Official Class Required",
+          text:
+            "Select an active official section before saving or activating this student.",
+          confirmButtonColor:
+            "#2563eb",
+        });
 
-      await saveStudentSubjects(
-        selectedStudent.id,
-        selectedSubjects
-      );
+        return;
+      }
 
-      await saveStudentAdviser(
-        selectedStudent.id,
-        selectedAdviser
-      );
+      if (activate) {
+        const confirmation =
+          await Swal.fire({
+            icon:
+              "question",
+            title:
+              "Save and Activate Student?",
+            html: `
+              <div style="text-align:left">
+                <p>
+                  <strong>Student:</strong>
+                  ${
+                    selectedStudent.full_name ||
+                    selectedStudent.student_id
+                  }
+                </p>
 
-      updateLocalStudent(
-        studentUpdate
-      );
+                <p style="margin-top:8px">
+                  <strong>Official Class:</strong>
+                  ${
+                    selectedOfficialSection.courseCode
+                  }
+                  ${
+                    selectedOfficialSection.year_level
+                  }
+                  — Block
+                  ${
+                    selectedOfficialSection.block_code
+                  }
+                </p>
 
-      await Swal.fire({
-        icon: "success",
-        title: "Student Updated",
-        text:
-          "The official class assignment and section ID were saved.",
-        timer: 1800,
-        showConfirmButton: false,
-      });
-    } catch (error) {
-      console.error(
-        "Save student error:",
+                <p style="margin-top:8px">
+                  <strong>Term:</strong>
+                  ${
+                    selectedOfficialSection.semester
+                  },
+                  ${
+                    selectedOfficialSection.school_year
+                  }
+                </p>
+              </div>
+            `,
+            showCancelButton:
+              true,
+            confirmButtonText:
+              "Save and Activate",
+            cancelButtonText:
+              "Cancel",
+            confirmButtonColor:
+              "#059669",
+          });
+
+        if (
+          !confirmation.isConfirmed
+        ) {
+          return;
+        }
+      }
+
+      try {
+        if (activate) {
+          setActivating(
+            true
+          );
+        } else {
+          setSaving(
+            true
+          );
+        }
+
+        const updatePayload = {
+          section_id:
+            selectedOfficialSection.id,
+
+          course:
+            selectedOfficialSection.courseCode,
+
+          year_level:
+            selectedOfficialSection.year_level,
+
+          section:
+            selectedOfficialSection.block_code,
+
+          semester:
+            selectedOfficialSection.semester,
+
+          school_year:
+            selectedOfficialSection.school_year,
+
+          ...(activate
+            ? {
+                status:
+                  "Active",
+              }
+            : {}),
+        };
+
+        const {
+          error,
+        } = await supabase
+          .from("users")
+          .update(
+            updatePayload
+          )
+          .eq(
+            "id",
+            selectedStudent.id
+          );
+
+        if (error) {
+          throw error;
+        }
+
+        updateLocalStudent(
+          selectedStudent.id,
+          updatePayload
+        );
+
+        await Swal.fire({
+          icon:
+            "success",
+          title: activate
+            ? "Student Activated"
+            : "Official Assignment Saved",
+          text: activate
+            ? "The student can now log in and use the clearance workflow."
+            : "The student's official section and academic term were updated.",
+          timer:
+            2100,
+          showConfirmButton:
+            false,
+        });
+      } catch (
         error
-      );
+      ) {
+        console.error(
+          "Save official student assignment error:",
+          error
+        );
 
-      Swal.fire({
-        icon: "error",
-        title:
-          "Unable to Save Student",
-        text:
-          error?.message ||
-          "An unexpected error occurred.",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
+        await Swal.fire({
+          icon:
+            "error",
+          title: activate
+            ? "Activation Failed"
+            : "Save Failed",
+          text:
+            error?.message ||
+            "Unable to update the student record.",
+          confirmButtonColor:
+            "#2563eb",
+        });
+      } finally {
+        setSaving(
+          false
+        );
+
+        setActivating(
+          false
+        );
+      }
+    };
 
   /*
-  =====================================
-  ACTIVATE STUDENT
-  =====================================
+  |--------------------------------------------------------------------------
+  | DISPLAY HELPERS
+  |--------------------------------------------------------------------------
   */
 
-  const handleActivate = async () => {
-    if (!selectedStudent) {
-      return;
-    }
+  const getSectionLabel =
+    (
+      sectionRecord
+    ) => {
+      if (
+        !sectionRecord
+      ) {
+        return "Not assigned";
+      }
 
-    if (!selectedSectionId) {
-      Swal.fire({
-        icon: "warning",
-        title:
-          "Cannot Activate Student",
-        text:
-          "Assign the student to an official class first.",
-      });
+      return [
+        sectionRecord.courseCode,
+        sectionRecord.year_level,
+        `Block ${sectionRecord.block_code}`,
+        sectionRecord.semester,
+        sectionRecord.school_year,
+      ]
+        .filter(Boolean)
+        .join(" • ");
+    };
 
-      return;
-    }
+  const clearFilters =
+    () => {
+      setSearch("");
+      setStatusFilter(
+        "All"
+      );
+      setCourseFilter(
+        "All"
+      );
+      setYearFilter(
+        "All"
+      );
+    };
 
-    if (!selectedOfficialSection) {
-      Swal.fire({
-        icon: "error",
-        title:
-          "Invalid Class Assignment",
-        text:
-          "The selected official class could not be found.",
-      });
+  if (loading) {
+    return (
+      <AdminLayout>
+        <div className="flex min-h-[65vh] items-center justify-center">
+          <div className="text-center">
+            <div className="relative mx-auto flex h-16 w-16 items-center justify-center">
+              <div className="absolute inset-0 animate-spin rounded-full border-4 border-blue-100 border-t-blue-700" />
 
-      return;
-    }
+              <FaUserGraduate className="text-xl text-blue-700" />
+            </div>
 
-    const confirmation =
-      await Swal.fire({
-        icon: "question",
-        title:
-          "Activate Student Account?",
-        html: `
-          <div style="text-align:left">
-            <p>
-              <strong>Student:</strong>
-              ${
-                selectedStudent.full_name ||
-                selectedStudent.student_id
-              }
-            </p>
-
-            <p style="margin-top:8px">
-              <strong>Official Class:</strong>
-              ${
-                selectedOfficialSection.courseCode
-              }
-              ${
-                selectedOfficialSection.year_level
-              }
-              — Block
-              ${
-                selectedOfficialSection.block_code
-              }
-            </p>
-
-            <p style="margin-top:8px">
-              <strong>Term:</strong>
-              ${
-                selectedOfficialSection.semester
-              },
-              ${
-                selectedOfficialSection.school_year
-              }
+            <p className="mt-4 font-bold text-slate-700">
+              Loading student records...
             </p>
           </div>
-        `,
-        showCancelButton: true,
-        confirmButtonText:
-          "Activate Account",
-        cancelButtonText: "Cancel",
-        confirmButtonColor:
-          "#16a34a",
-      });
-
-    if (!confirmation.isConfirmed) {
-      return;
-    }
-
-    try {
-      setActivating(true);
-
-      const studentUpdate = {
-        section_id:
-          selectedOfficialSection.id,
-
-        course:
-          selectedOfficialSection
-            .courseCode,
-
-        year_level:
-          selectedOfficialSection
-            .year_level,
-
-        section:
-          selectedOfficialSection
-            .block_code,
-
-        semester:
-          selectedOfficialSection
-            .semester,
-
-        school_year:
-          selectedOfficialSection
-            .school_year,
-
-        status: "Active",
-      };
-
-      const {
-        error: activationError,
-      } = await supabase
-        .from("users")
-        .update(studentUpdate)
-        .eq(
-          "id",
-          selectedStudent.id
-        );
-
-      if (activationError) {
-        throw activationError;
-      }
-
-      updateLocalStudent(
-        studentUpdate
-      );
-
-      await Swal.fire({
-        icon: "success",
-        title:
-          "Student Activated",
-        text:
-          "The student can now log in and submit a clearance request.",
-      });
-    } catch (error) {
-      console.error(
-        "Activate student error:",
-        error
-      );
-
-      Swal.fire({
-        icon: "error",
-        title:
-          "Activation Failed",
-        text:
-          error?.message ||
-          "Unable to activate the student.",
-      });
-    } finally {
-      setActivating(false);
-    }
-  };
-
-  /*
-  =====================================
-  REFRESH
-  =====================================
-  */
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await loadData();
-  };
-
-  /*
-  =====================================
-  DISPLAY HELPERS
-  =====================================
-  */
-
-  const getStatusClass = (
-    status
-  ) => {
-    if (status === "Active") {
-      return "bg-green-100 text-green-700";
-    }
-
-    if (status === "Inactive") {
-      return "bg-red-100 text-red-700";
-    }
-
-    return "bg-yellow-100 text-yellow-700";
-  };
-
-  const getSectionLabel = (
-    sectionRecord
-  ) => {
-    return [
-      sectionRecord.courseCode,
-
-      sectionRecord.year_level,
-
-      `Block ${
-        sectionRecord.block_code
-      }`,
-
-      sectionRecord.semester,
-
-      sectionRecord.school_year,
-    ]
-      .filter(Boolean)
-      .join(" — ");
-  };
+        </div>
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout>
       <motion.main
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{
-          duration: 0.5,
-          ease: [0.22, 1, 0.36, 1],
+        initial={{
+          opacity: 0,
+          y: 12,
         }}
-        className="relative pb-10"
-      >
-      <div className="space-y-6">
-        <motion.section
-        initial={{ opacity: 0, y: -18 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{
-          duration: 0.6,
-          ease: [0.22, 1, 0.36, 1],
+        animate={{
+          opacity: 1,
+          y: 0,
         }}
-        className="relative mb-7 overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#061b51] text-white shadow-[0_24px_60px_rgba(2,12,40,0.24)]"
+        transition={{
+          duration:
+            0.45,
+          ease: [
+            0.22,
+            1,
+            0.36,
+            1,
+          ],
+        }}
+        className="space-y-5 pb-8"
       >
-        <div
-          className="absolute inset-0 bg-cover bg-center opacity-25"
-          style={{
-            backgroundImage: `url(${campusImage})`,
-          }}
-        />
+        {/* Compact branded header */}
 
-        <div className="absolute inset-0 bg-gradient-to-r from-[#03143f]/98 via-[#082a70]/94 to-[#0b4f92]/82" />
-
-        <motion.div
-          animate={{
-            x: [0, 24, 0],
-            y: [0, -14, 0],
-          }}
-          transition={{
-            duration: 10,
-            repeat: Infinity,
-            ease: "easeInOut",
-          }}
-          className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-cyan-300/15 blur-3xl"
-        />
-
-        <div className="relative z-10 flex items-center gap-4 p-6 sm:p-7">
-          <motion.div
-            whileHover={{
-              rotate: 4,
-              scale: 1.04,
+        <section className="relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#061b51] text-white shadow-[0_18px_45px_rgba(2,12,40,0.2)]">
+          <div
+            className="absolute inset-0 bg-cover bg-center opacity-20"
+            style={{
+              backgroundImage:
+                `url(${campusImage})`,
             }}
-            className="hidden h-16 w-16 shrink-0 overflow-hidden rounded-full border border-white/25 bg-white p-1 shadow-xl sm:block"
-          >
-            <img
-              src={schoolLogo}
-              alt="Consolatrix College seal"
-              className="h-full w-full rounded-full object-cover"
-            />
-          </motion.div>
+          />
 
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-blue-100">
-              <FaUserGraduate className="text-cyan-300" />
-              Account Verification
+          <div className="absolute inset-0 bg-gradient-to-r from-[#03143f]/98 via-[#082a70]/94 to-[#0b4f92]/80" />
+
+          <div className="relative z-10 flex flex-col gap-4 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-start gap-4">
+              <img
+                src={
+                  schoolLogo
+                }
+                alt="Consolatrix College seal"
+                className="hidden h-14 w-14 shrink-0 rounded-full border border-white/25 bg-white p-1 object-cover shadow-lg sm:block"
+              />
+
+              <div className="min-w-0">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.15em] text-cyan-200">
+                  <FaUserGraduate />
+                  Account Verification
+                </div>
+
+                <h1 className="mt-3 text-2xl font-black tracking-tight sm:text-3xl">
+                  Student Management
+                </h1>
+
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-blue-100/70">
+                  Verify submitted information, assign the official section,
+                  and activate eligible student accounts.
+                </p>
+              </div>
             </div>
 
-            <h1 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl">
-              Student Management
-            </h1>
+            <button
+              type="button"
+              onClick={() =>
+                loadData({
+                  refresh:
+                    true,
+                })
+              }
+              disabled={
+                refreshing
+              }
+              className="inline-flex h-11 items-center justify-center gap-2 self-start rounded-xl border border-white/15 bg-white/10 px-4 text-sm font-bold text-white transition hover:bg-white/15 disabled:opacity-50 lg:self-center"
+            >
+              <FaSyncAlt
+                className={
+                  refreshing
+                    ? "animate-spin"
+                    : ""
+                }
+              />
 
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-blue-100/75">
-              Verify student information, assign the official course and section, and activate accounts for clearance access.
-            </p>
+              {refreshing
+                ? "Refreshing..."
+                : "Refresh"}
+            </button>
           </div>
-        </div>
-      </motion.section>
+        </section>
 
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-          {/* Left panel */}
+        {/* Summary */}
 
-          <div className="rounded-[1.75rem] border border-slate-200/80 bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.08)] xl:col-span-4">
-            <div className="relative mb-6">
-              <FaSearch className="absolute left-4 top-4 text-slate-400" />
+        <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[
+            {
+              label:
+                "Total Students",
+              value:
+                statistics.total,
+              icon:
+                FaUsers,
+              className:
+                "bg-blue-50 text-blue-700",
+            },
+            {
+              label:
+                "Active",
+              value:
+                statistics.active,
+              icon:
+                FaCheckCircle,
+              className:
+                "bg-emerald-50 text-emerald-700",
+            },
+            {
+              label:
+                "Pending",
+              value:
+                statistics.pending,
+              icon:
+                FaUserGraduate,
+              className:
+                "bg-amber-50 text-amber-700",
+            },
+            {
+              label:
+                "No Official Class",
+              value:
+                statistics.unassigned,
+              icon:
+                FaExclamationTriangle,
+              className:
+                "bg-red-50 text-red-700",
+            },
+          ].map(
+            (
+              item,
+              index
+            ) => {
+              const Icon =
+                item.icon;
+
+              return (
+                <motion.article
+                  key={
+                    item.label
+                  }
+                  initial={{
+                    opacity: 0,
+                    y: 10,
+                  }}
+                  animate={{
+                    opacity: 1,
+                    y: 0,
+                  }}
+                  transition={{
+                    delay:
+                      index *
+                      0.05,
+                  }}
+                  className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                >
+                  <div
+                    className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${item.className}`}
+                  >
+                    <Icon />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-2xl font-black text-slate-900">
+                      {
+                        item.value
+                      }
+                    </p>
+
+                    <p className="truncate text-xs font-semibold text-slate-500">
+                      {
+                        item.label
+                      }
+                    </p>
+                  </div>
+                </motion.article>
+              );
+            }
+          )}
+        </section>
+
+        {/* Search and filters */}
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_180px_180px_180px_auto]">
+            <label className="relative block">
+              <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
 
               <input
-                type="text"
-                placeholder="Search student..."
-                className="w-full rounded-xl border py-3 pl-11 pr-4 outline-none focus:border-blue-600"
-                value={search}
-                onChange={(event) =>
+                type="search"
+                value={
+                  search
+                }
+                onChange={(
+                  event
+                ) =>
                   setSearch(
                     event.target.value
                   )
                 }
+                placeholder="Search name, student ID, email, course, or block..."
+                className="h-11 w-full rounded-xl border border-slate-300 pl-11 pr-4 text-sm outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
               />
+            </label>
+
+            <label className="relative">
+              <FaFilter className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+
+              <select
+                value={
+                  statusFilter
+                }
+                onChange={(
+                  event
+                ) =>
+                  setStatusFilter(
+                    event.target.value
+                  )
+                }
+                className="h-11 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-11 pr-3 text-sm font-semibold text-slate-700 outline-none focus:border-blue-600"
+              >
+                <option value="All">
+                  All Statuses
+                </option>
+
+                <option value="Pending">
+                  Pending
+                </option>
+
+                <option value="Active">
+                  Active
+                </option>
+
+                <option value="Inactive">
+                  Inactive
+                </option>
+
+                <option value="Unassigned">
+                  No Official Class
+                </option>
+              </select>
+            </label>
+
+            <select
+              value={
+                courseFilter
+              }
+              onChange={(
+                event
+              ) =>
+                setCourseFilter(
+                  event.target.value
+                )
+              }
+              className="h-11 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 outline-none focus:border-blue-600"
+            >
+              <option value="All">
+                All Courses
+              </option>
+
+              {courseOptions.map(
+                (
+                  course
+                ) => (
+                  <option
+                    key={
+                      course
+                    }
+                    value={
+                      course
+                    }
+                  >
+                    {
+                      course
+                    }
+                  </option>
+                )
+              )}
+            </select>
+
+            <select
+              value={
+                yearFilter
+              }
+              onChange={(
+                event
+              ) =>
+                setYearFilter(
+                  event.target.value
+                )
+              }
+              className="h-11 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 outline-none focus:border-blue-600"
+            >
+              <option value="All">
+                All Year Levels
+              </option>
+
+              {yearOptions.map(
+                (
+                  year
+                ) => (
+                  <option
+                    key={
+                      year
+                    }
+                    value={
+                      year
+                    }
+                  >
+                    {
+                      year
+                    }
+                  </option>
+                )
+              )}
+            </select>
+
+            <button
+              type="button"
+              onClick={
+                clearFilters
+              }
+              className="h-11 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-100"
+            >
+              Clear
+            </button>
+          </div>
+        </section>
+
+        {/* Student workspace */}
+
+        <section className="grid min-h-[620px] gap-5 xl:grid-cols-[350px_minmax(0,1fr)]">
+          {/* Student directory */}
+
+          <aside className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4">
+              <div>
+                <h2 className="font-black text-slate-900">
+                  Student Directory
+                </h2>
+
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {
+                    filteredStudents.length
+                  }{" "}
+                  record
+                  {filteredStudents.length ===
+                  1
+                    ? ""
+                    : "s"}
+                </p>
+              </div>
+
+              {selectedStudent && (
+                <button
+                  type="button"
+                  onClick={
+                    clearSelection
+                  }
+                  className="text-xs font-bold text-blue-700 hover:underline"
+                >
+                  Clear selection
+                </button>
+              )}
             </div>
 
-            <div className="max-h-[700px] space-y-3 overflow-y-auto">
-              {loading ? (
-                <p className="py-8 text-center text-slate-500">
-                  Loading students...
-                </p>
-              ) : filteredStudents.length ===
-                0 ? (
-                <p className="py-8 text-center text-slate-500">
-                  No students found.
-                </p>
+            <div className="max-h-[70vh] min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+              {filteredStudents.length ===
+              0 ? (
+                <div className="flex min-h-48 items-center justify-center px-6 text-center">
+                  <div>
+                    <FaUserGraduate className="mx-auto text-4xl text-slate-300" />
+
+                    <p className="mt-3 font-bold text-slate-600">
+                      No students found
+                    </p>
+
+                    <p className="mt-1 text-xs text-slate-400">
+                      Change the search or filter options.
+                    </p>
+                  </div>
+                </div>
               ) : (
                 filteredStudents.map(
-                  (student) => (
-                    <button
-                      type="button"
-                      key={student.id}
-                      onClick={() =>
-                        openStudent(student)
-                      }
-                      className={`w-full rounded-2xl border p-4 text-left transition duration-200 hover:-translate-y-0.5 ${
-                        selectedStudent?.id ===
-                        student.id
-                          ? "border-blue-500 bg-blue-50 shadow-sm"
-                          : "hover:bg-slate-50"
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <FaUserGraduate className="mt-1 text-2xl text-blue-600" />
+                  (
+                    student,
+                    index
+                  ) => {
+                    const active =
+                      selectedStudent?.id ===
+                      student.id;
+
+                    return (
+                      <motion.button
+                        key={
+                          student.id
+                        }
+                        initial={{
+                          opacity: 0,
+                          x: -8,
+                        }}
+                        animate={{
+                          opacity: 1,
+                          x: 0,
+                        }}
+                        transition={{
+                          delay:
+                            Math.min(
+                              index *
+                                0.025,
+                              0.25
+                            ),
+                        }}
+                        type="button"
+                        onClick={() =>
+                          openStudent(
+                            student
+                          )
+                        }
+                        className={`group flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${
+                          active
+                            ? "border-blue-300 bg-blue-50 shadow-sm"
+                            : "border-transparent hover:border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div
+                          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-black ${
+                            active
+                              ? "bg-blue-700 text-white"
+                              : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {getInitials(
+                            student.full_name
+                          )}
+                        </div>
 
                         <div className="min-w-0 flex-1">
-                          <h2 className="truncate font-semibold text-slate-800">
+                          <p className="truncate text-sm font-black text-slate-900">
                             {student.full_name ||
                               "No Name"}
-                          </h2>
-
-                          <p className="text-sm text-slate-500">
-                            {student.student_id ||
-                              "No Student ID"}
                           </p>
 
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <p className="mt-0.5 truncate text-xs text-slate-500">
+                            {student.student_id ||
+                              "No Student ID"}
+                            {" • "}
+                            {student.course ||
+                              "No Course"}
+                          </p>
+
+                          <div className="mt-2 flex flex-wrap gap-1.5">
                             <span
-                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusClass(
+                              className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${getStatusClass(
                                 student.status
                               )}`}
                             >
@@ -1053,38 +1498,114 @@ function StudentManagement() {
                             </span>
 
                             {!student.section_id && (
-                              <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">
-                                No Official Class
+                              <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                                Unassigned
                               </span>
                             )}
                           </div>
                         </div>
-                      </div>
-                    </button>
-                  )
+
+                        <FaChevronRight
+                          className={`shrink-0 text-xs ${
+                            active
+                              ? "text-blue-600"
+                              : "text-slate-300 group-hover:text-slate-500"
+                          }`}
+                        />
+                      </motion.button>
+                    );
+                  }
                 )
               )}
             </div>
-          </div>
+          </aside>
 
-          {/* Right panel */}
+          {/* Verification workspace */}
 
-          <div className="rounded-[1.75rem] border border-slate-200/80 bg-white p-5 shadow-[0_18px_50px_rgba(15,23,42,0.08)] xl:col-span-8">
-            {selectedStudent ? (
-              <>
-                <div className="mb-8 flex flex-col justify-between gap-4 border-b pb-6 md:flex-row md:items-center">
-                  <div>
-                    <h2 className="text-3xl font-bold text-slate-800">
-                      {selectedStudent.full_name ||
-                        "No Name"}
+          <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <AnimatePresence
+              mode="wait"
+            >
+              {!selectedStudent ? (
+                <motion.div
+                  key="empty"
+                  initial={{
+                    opacity: 0,
+                  }}
+                  animate={{
+                    opacity: 1,
+                  }}
+                  exit={{
+                    opacity: 0,
+                  }}
+                  className="flex min-h-[620px] items-center justify-center p-8 text-center"
+                >
+                  <div className="max-w-sm">
+                    <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-slate-100 text-3xl text-slate-400">
+                      <FaUserGraduate />
+                    </div>
+
+                    <h2 className="mt-5 text-2xl font-black text-slate-800">
+                      Select a Student
                     </h2>
 
-                    <p className="mt-1 text-slate-500">
-                      {selectedStudent.student_id}
+                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                      Choose a student from the directory to review their
+                      submitted information and assign the correct official
+                      section.
                     </p>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key={
+                    selectedStudent.id
+                  }
+                  initial={{
+                    opacity: 0,
+                    x: 12,
+                  }}
+                  animate={{
+                    opacity: 1,
+                    x: 0,
+                  }}
+                  exit={{
+                    opacity: 0,
+                    x: -12,
+                  }}
+                  transition={{
+                    duration:
+                      0.22,
+                  }}
+                >
+                  {/* Selected student header */}
+
+                  <div className="flex flex-col gap-4 border-b border-slate-100 bg-slate-50/70 p-5 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-4">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#071b4b] text-lg font-black text-cyan-200">
+                        {getInitials(
+                          selectedStudent.full_name
+                        )}
+                      </div>
+
+                      <div className="min-w-0">
+                        <h2 className="truncate text-xl font-black text-slate-900 sm:text-2xl">
+                          {selectedStudent.full_name ||
+                            "No Name"}
+                        </h2>
+
+                        <p className="mt-1 truncate text-sm text-slate-500">
+                          {selectedStudent.student_id ||
+                            "No Student ID"}
+                          {" • "}
+                          {selectedStudent.email ||
+                            "No email"}
+                        </p>
+                      </div>
+                    </div>
 
                     <span
-                      className={`mt-3 inline-block rounded-full px-3 py-1.5 text-sm font-semibold ${getStatusClass(
+                      className={`inline-flex self-start rounded-full border px-3 py-1.5 text-xs font-black sm:self-center ${getStatusClass(
                         selectedStudent.status
                       )}`}
                     >
@@ -1093,330 +1614,294 @@ function StudentManagement() {
                     </span>
                   </div>
 
-                  <FaEdit className="text-4xl text-blue-600" />
-                </div>
+                  <div className="space-y-5 p-5 sm:p-6">
+                    {!selectedStudent.section_id && (
+                      <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                        <FaExclamationTriangle className="mt-0.5 shrink-0 text-amber-600" />
 
-                {!selectedStudent.section_id && (
-                  <div className="mb-6 flex gap-4 rounded-2xl border border-yellow-300 bg-yellow-50 p-5">
-                    <FaExclamationTriangle className="mt-1 text-2xl text-yellow-600" />
+                        <div>
+                          <p className="font-black text-amber-900">
+                            Official class not yet assigned
+                          </p>
 
-                    <div>
-                      <h3 className="font-bold text-yellow-800">
-                        Official class not
-                        assigned
-                      </h3>
-
-                      <p className="mt-1 text-sm text-yellow-700">
-                        This student cannot
-                        submit a clearance
-                        request until an actual
-                        section ID is assigned.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Submitted information */}
-
-                <div>
-                  <h3 className="mb-4 text-xl font-bold text-slate-800">
-                    Submitted Academic
-                    Information
-                  </h3>
-
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div className="rounded-xl bg-slate-50 p-4">
-                      <p className="text-sm text-slate-500">
-                        Course
-                      </p>
-
-                      <p className="mt-1 font-semibold text-slate-800">
-                        {selectedStudent.course ||
-                          "Not provided"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-4">
-                      <p className="text-sm text-slate-500">
-                        Year Level
-                      </p>
-
-                      <p className="mt-1 font-semibold text-slate-800">
-                        {selectedStudent.year_level ||
-                          "Not provided"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-4">
-                      <p className="text-sm text-slate-500">
-                        Block
-                      </p>
-
-                      <p className="mt-1 font-semibold text-slate-800">
-                        {selectedStudent.section
-                          ? `Block ${selectedStudent.section}`
-                          : "Not provided"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-4">
-                      <p className="text-sm text-slate-500">
-                        Semester
-                      </p>
-
-                      <p className="mt-1 font-semibold text-slate-800">
-                        {selectedStudent.semester ||
-                          "Not provided"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-4">
-                      <p className="text-sm text-slate-500">
-                        School Year
-                      </p>
-
-                      <p className="mt-1 font-semibold text-slate-800">
-                        {selectedStudent.school_year ||
-                          "Not provided"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Official assignment */}
-
-                <div className="mt-8 rounded-2xl border border-blue-200 bg-blue-50/50 p-5">
-                  <div className="mb-4 flex items-center gap-3">
-                    <div className="rounded-xl bg-blue-100 p-3 text-blue-700">
-                      <FaLayerGroup />
-                    </div>
-
-                    <div>
-                      <h3 className="text-xl font-bold text-slate-800">
-                        Official Class
-                        Assignment
-                      </h3>
-
-                      <p className="text-sm text-slate-500">
-                        Select the real class
-                        record connected to the
-                        sections table.
-                      </p>
-                    </div>
-                  </div>
-
-                  <select
-                    value={selectedSectionId}
-                    onChange={
-                      handleSectionChange
-                    }
-                    className="w-full rounded-xl border border-slate-300 bg-white p-3 outline-none focus:border-blue-600"
-                  >
-                    <option value="">
-                      Select Official Course,
-                      Year, Semester and Block
-                    </option>
-
-                    {sections.map(
-                      (sectionRecord) => (
-                        <option
-                          key={
-                            sectionRecord.id
-                          }
-                          value={
-                            sectionRecord.id
-                          }
-                        >
-                          {getSectionLabel(
-                            sectionRecord
-                          )}
-                        </option>
-                      )
+                          <p className="mt-1 text-sm leading-6 text-amber-700">
+                            The student cannot use the clearance workflow until
+                            a real section record is saved and the account is
+                            activated.
+                          </p>
+                        </div>
+                      </div>
                     )}
-                  </select>
 
-                  {selectedOfficialSection && (
-                    <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4">
-                      <p className="text-sm font-semibold text-green-800">
-                        Selected Official Class
-                      </p>
+                    <div className="grid gap-5 lg:grid-cols-2">
+                      {/* Submitted data */}
 
-                      <p className="mt-2 text-green-700">
-                        {getSectionLabel(
-                          selectedOfficialSection
-                        )}
-                      </p>
-
-                      <p className="mt-2 break-all text-xs text-green-600">
-                        Section ID:{" "}
-                        {
-                          selectedOfficialSection.id
-                        }
-                      </p>
-                    </div>
-                  )}
-
-                  {sections.length === 0 && (
-                    <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-                      No active official
-                      sections are available.
-                      Create the required block
-                      under Course Management
-                      first.
-                    </div>
-                  )}
-                </div>
-
-                {/* Adviser */}
-
-                <div className="mt-8">
-                  <label className="mb-2 block text-lg font-bold text-slate-800">
-                    Adviser
-                  </label>
-
-                  <select
-                    className="w-full rounded-xl border p-3 outline-none focus:border-blue-600"
-                    value={selectedAdviser}
-                    onChange={(event) =>
-                      setSelectedAdviser(
-                        event.target.value
-                      )
-                    }
-                  >
-                    <option value="">
-                      Select Adviser
-                    </option>
-
-                    {advisers.map(
-                      (adviser) => (
-                        <option
-                          key={adviser.id}
-                          value={adviser.id}
-                        >
-                          {adviser.full_name}
-                        </option>
-                      )
-                    )}
-                  </select>
-                </div>
-
-                {/* Subject assignments */}
-
-                <div className="mt-10">
-                  <h3 className="mb-2 text-xl font-bold text-slate-800">
-                    Assign Subjects
-                  </h3>
-
-                  <p className="mb-4 text-sm text-slate-500">
-                    Existing student subject
-                    assignments are retained.
-                    Clearance teacher
-                    assignments are generated
-                    from Class Assignments.
-                  </p>
-
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {subjects.map(
-                      (subject) => (
-                        <label
-                          key={subject.id}
-                          className="flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition hover:bg-slate-50"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedSubjects.includes(
-                              subject.id
-                            )}
-                            onChange={() =>
-                              toggleSubject(
-                                subject.id
-                              )
-                            }
-                            className="h-5 w-5 accent-blue-600"
-                          />
+                      <section className="rounded-2xl border border-slate-200 p-5">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+                            <FaIdCard />
+                          </div>
 
                           <div>
-                            <p className="font-semibold text-slate-800">
-                              {
-                                subject.subject_name
-                              }
+                            <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+                              Registration Data
                             </p>
 
-                            <p className="text-sm text-slate-500">
-                              {
-                                subject.subject_code
-                              }
-                            </p>
+                            <h3 className="font-black text-slate-900">
+                              Submitted Information
+                            </h3>
                           </div>
+                        </div>
+
+                        <dl className="mt-5 divide-y divide-slate-100">
+                          {[
+                            [
+                              "Course",
+                              selectedStudent.course,
+                            ],
+                            [
+                              "Year Level",
+                              selectedStudent.year_level,
+                            ],
+                            [
+                              "Block",
+                              selectedStudent.section
+                                ? `Block ${selectedStudent.section}`
+                                : null,
+                            ],
+                            [
+                              "Semester",
+                              selectedStudent.semester,
+                            ],
+                            [
+                              "School Year",
+                              selectedStudent.school_year,
+                            ],
+                          ].map(
+                            ([
+                              label,
+                              value,
+                            ]) => (
+                              <div
+                                key={
+                                  label
+                                }
+                                className="flex items-start justify-between gap-4 py-3"
+                              >
+                                <dt className="text-sm font-semibold text-slate-500">
+                                  {
+                                    label
+                                  }
+                                </dt>
+
+                                <dd className="text-right text-sm font-black text-slate-800">
+                                  {value ||
+                                    "Not provided"}
+                                </dd>
+                              </div>
+                            )
+                          )}
+                        </dl>
+
+                        {automaticMatch &&
+                          !selectedStudent.section_id && (
+                            <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
+                              A unique matching official section was found
+                              automatically and selected for verification.
+                            </div>
+                          )}
+                      </section>
+
+                      {/* Official section */}
+
+                      <section className="rounded-2xl border border-blue-200 bg-blue-50/40 p-5">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+                            <FaLayerGroup />
+                          </div>
+
+                          <div>
+                            <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-500">
+                              Verified Record
+                            </p>
+
+                            <h3 className="font-black text-slate-900">
+                              Official Section Assignment
+                            </h3>
+                          </div>
+                        </div>
+
+                        <label className="mt-5 block">
+                          <span className="mb-2 block text-sm font-bold text-slate-700">
+                            Select Official Class
+                          </span>
+
+                          <select
+                            value={
+                              selectedSectionId
+                            }
+                            onChange={(
+                              event
+                            ) =>
+                              setSelectedSectionId(
+                                event.target.value
+                              )
+                            }
+                            className="min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+                          >
+                            <option value="">
+                              Select course, year, block, semester, and school year
+                            </option>
+
+                            {sections.map(
+                              (
+                                sectionRecord
+                              ) => (
+                                <option
+                                  key={
+                                    sectionRecord.id
+                                  }
+                                  value={
+                                    sectionRecord.id
+                                  }
+                                >
+                                  {getSectionLabel(
+                                    sectionRecord
+                                  )}
+                                </option>
+                              )
+                            )}
+                          </select>
                         </label>
-                      )
-                    )}
+
+                        {selectedOfficialSection ? (
+                          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                            <div className="flex items-start gap-3">
+                              <FaCheckCircle className="mt-0.5 shrink-0 text-emerald-600" />
+
+                              <div className="min-w-0">
+                                <p className="font-black text-emerald-900">
+                                  Selected Official Class
+                                </p>
+
+                                <p className="mt-1 text-sm leading-6 text-emerald-700">
+                                  {getSectionLabel(
+                                    selectedOfficialSection
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
+                            No official section is selected.
+                          </div>
+                        )}
+
+                        {currentOfficialSection && (
+                          <p className="mt-3 text-xs text-slate-500">
+                            Current saved assignment:{" "}
+                            <span className="font-bold text-slate-700">
+                              {getSectionLabel(
+                                currentOfficialSection
+                              )}
+                            </span>
+                          </p>
+                        )}
+
+                        {sections.length ===
+                          0 && (
+                          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                            No active official sections are available. Create
+                            the required section under Academic Setup first.
+                          </div>
+                        )}
+                      </section>
+                    </div>
+
+                    {/* Assignment explanation */}
+
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-start gap-3">
+                        <FaGraduationCap className="mt-0.5 shrink-0 text-blue-700" />
+
+                        <p className="text-sm leading-6 text-slate-600">
+                          Subjects and teachers are assigned automatically from
+                          the selected section's official class offerings.
+                          Students are not assigned subjects individually on
+                          this page.
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                {/* Actions */}
+                  {/* Actions */}
 
-                <div className="mt-10 flex flex-wrap gap-3 border-t pt-6">
-                  <button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={
-                      saving ||
-                      activating ||
-                      !selectedSectionId
-                    }
-                    className="flex items-center gap-3 rounded-xl bg-blue-600 px-7 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <FaSave />
-
-                    {saving
-                      ? "Saving..."
-                      : "Save Student"}
-                  </button>
-
-                  {selectedStudent.status !==
-                    "Active" && (
+                  <div className="flex flex-col-reverse gap-3 border-t border-slate-100 bg-white p-5 sm:flex-row sm:justify-end">
                     <button
                       type="button"
                       onClick={
-                        handleActivate
+                        clearSelection
+                      }
+                      disabled={
+                        saving ||
+                        activating
+                      }
+                      className="h-11 rounded-xl border border-slate-300 px-5 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      Close
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        saveOfficialAssignment()
                       }
                       disabled={
                         saving ||
                         activating ||
-                        !selectedSectionId
+                        !selectedOfficialSection
                       }
-                      className="flex items-center gap-3 rounded-xl bg-green-600 px-7 py-3 font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 text-sm font-black text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <FaCheckCircle />
+                      <FaSave />
 
-                      {activating
-                        ? "Activating..."
-                        : "Save and Activate"}
+                      {saving
+                        ? "Saving..."
+                        : "Save Assignment"}
                     </button>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className="flex min-h-[600px] items-center justify-center">
-                <div className="text-center">
-                  <FaUserGraduate className="mx-auto mb-5 text-7xl text-slate-300" />
 
-                  <h2 className="text-2xl font-bold text-slate-500">
-                    Select a Student
-                  </h2>
+                    {selectedStudent.status !==
+                      "Active" && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          saveOfficialAssignment({
+                            activate:
+                              true,
+                          })
+                        }
+                        disabled={
+                          saving ||
+                          activating ||
+                          !selectedOfficialSection
+                        }
+                        className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-black text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <FaCheckCircle />
 
-                  <p className="mt-2 text-slate-400">
-                    Choose a student from the
-                    left panel.
-                  </p>
-                </div>
-              </div>
-            )}
+                        {activating
+                          ? "Activating..."
+                          : "Save & Activate"}
+                      </button>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-        </div>
-      </div>
-          </motion.main>
+        </section>
+      </motion.main>
     </AdminLayout>
   );
 }

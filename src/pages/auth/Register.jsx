@@ -32,9 +32,11 @@ import {
   FaLayerGroup,
   FaLock,
   FaRobot,
+  FaSearch,
   FaShieldAlt,
   FaUser,
   FaUserCheck,
+  FaUserGraduate,
   FaUserTag,
 } from "react-icons/fa";
 
@@ -72,7 +74,7 @@ const SEMESTERS = [
 ];
 
 const BLOCKS = Array.from(
-  { length: 26 },
+  { length: 6 },
   (_, index) =>
     String.fromCharCode(65 + index)
 );
@@ -96,6 +98,9 @@ const createDefaultFormData = () => ({
 
   student_number: "",
   employee_id: "",
+
+  student_type: "Regular",
+  irregular_subject_ids: [],
 
   course_id: "",
   year_level: "",
@@ -197,6 +202,26 @@ function Register() {
   ] = useState([]);
 
   const [
+    subjects,
+    setSubjects,
+  ] = useState([]);
+
+  const [
+    loadingSubjects,
+    setLoadingSubjects,
+  ] = useState(true);
+
+  const [
+    subjectSearch,
+    setSubjectSearch,
+  ] = useState("");
+
+  const [
+    subjectLoadError,
+    setSubjectLoadError,
+  ] = useState("");
+
+  const [
     formData,
     setFormData,
   ] = useState(
@@ -271,6 +296,65 @@ function Register() {
     loadCourses();
   }, []);
 
+  useEffect(() => {
+    const loadSubjects = async () => {
+      try {
+        setLoadingSubjects(true);
+        setSubjectLoadError("");
+
+        const {
+          data,
+          error,
+        } = await supabase
+          .from("subjects")
+          .select(`
+            id,
+            subject_code,
+            subject_name,
+            program,
+            year_level,
+            semester,
+            units,
+            is_active
+          `)
+          .eq(
+            "is_active",
+            true
+          )
+          .order(
+            "subject_code",
+            {
+              ascending:
+                true,
+            }
+          );
+
+        if (error) {
+          throw error;
+        }
+
+        setSubjects(
+          data || []
+        );
+      } catch (error) {
+        console.error(
+          "Load irregular subjects error:",
+          error
+        );
+
+        setSubjects([]);
+        setSubjectLoadError(
+          error?.message ||
+            "Unable to load subjects."
+        );
+      } finally {
+        setLoadingSubjects(false);
+      }
+    };
+
+    loadSubjects();
+  }, []);
+
   /*
   =====================================
   DYNAMIC STEPS
@@ -341,6 +425,97 @@ function Register() {
       formData.course_id,
     ]);
 
+  const filteredSubjects =
+    useMemo(() => {
+      const keyword =
+        subjectSearch
+          .trim()
+          .toLowerCase();
+
+      if (!keyword) {
+        return subjects;
+      }
+
+      return subjects.filter(
+        (
+          subject
+        ) => {
+          const searchable =
+            [
+              subject.subject_code,
+              subject.subject_name,
+              subject.program,
+              subject.year_level,
+              subject.semester,
+              subject.units,
+            ]
+              .filter(Boolean)
+              .join(" ")
+              .toLowerCase();
+
+          return searchable.includes(
+            keyword
+          );
+        }
+      );
+    }, [
+      subjects,
+      subjectSearch,
+    ]);
+
+  const toggleIrregularSubject = (
+    subjectId
+  ) => {
+    setFormData(
+      (previousData) => {
+        const alreadySelected =
+          previousData.irregular_subject_ids.includes(
+            subjectId
+          );
+
+        return {
+          ...previousData,
+
+          irregular_subject_ids:
+            alreadySelected
+              ? previousData.irregular_subject_ids.filter(
+                  (id) =>
+                    id !== subjectId
+                )
+              : [
+                  ...previousData.irregular_subject_ids,
+                  subjectId,
+                ],
+        };
+      }
+    );
+  };
+
+  const selectStudentType = (
+    studentType
+  ) => {
+    setFormData(
+      (previousData) => ({
+        ...previousData,
+
+        student_type:
+          studentType,
+
+        irregular_subject_ids:
+          studentType ===
+          "Irregular"
+            ? previousData.irregular_subject_ids
+            : [],
+      })
+    );
+
+    if (
+      studentType === "Regular"
+    ) {
+      setSubjectSearch("");
+    }
+  };
+
   /*
   =====================================
   INPUT HANDLERS
@@ -386,6 +561,18 @@ function Register() {
           "Approver"
             ? previousData.employee_id
             : "",
+
+        student_type:
+          selectedRole ===
+          "Student"
+            ? previousData.student_type
+            : "Regular",
+
+        irregular_subject_ids:
+          selectedRole ===
+          "Student"
+            ? previousData.irregular_subject_ids
+            : [],
 
         course_id:
           selectedRole ===
@@ -544,6 +731,20 @@ function Register() {
 
         return false;
       }
+
+      if (
+        formData.student_type ===
+          "Irregular" &&
+        formData.irregular_subject_ids
+          .length === 0
+      ) {
+        showValidationWarning(
+          "Irregular Subject Required",
+          "Please select at least one subject in which you are currently irregular."
+        );
+
+        return false;
+      }
     }
 
     if (
@@ -663,6 +864,20 @@ function Register() {
             ? formData.employee_id.trim()
             : null,
 
+        student_type:
+          formData.role ===
+          "Student"
+            ? formData.student_type
+            : null,
+
+        irregular_subject_ids:
+          formData.role ===
+            "Student" &&
+          formData.student_type ===
+            "Irregular"
+            ? formData.irregular_subject_ids
+            : [],
+
         course_id:
           formData.role ===
           "Student"
@@ -722,6 +937,11 @@ function Register() {
                 </p>
 
                 <p style="margin-top:12px">
+                  <strong>Classification:</strong>
+                  ${formData.student_type}
+                </p>
+
+                <p style="margin-top:6px">
                   <strong>Course:</strong>
                   ${
                     selectedCourse
@@ -745,6 +965,19 @@ function Register() {
                   ${formData.semester},
                   ${formData.school_year}
                 </p>
+
+                ${
+                  formData.student_type ===
+                  "Irregular"
+                    ? `
+                      <p style="margin-top:6px">
+                        <strong>Irregular Subjects:</strong>
+                        ${formData.irregular_subject_ids.length}
+                        selected for Administrator verification.
+                      </p>
+                    `
+                    : ""
+                }
               </div>
             `,
 
@@ -786,10 +1019,10 @@ function Register() {
     100;
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-slate-100 lg:h-screen lg:overflow-hidden">
+    <main className="relative min-h-screen overflow-x-hidden bg-slate-100">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(59,130,246,0.14),_transparent_34%)]" />
 
-      <div className="relative grid min-h-screen lg:h-screen lg:grid-cols-[0.72fr_1.28fr]">
+      <div className="relative grid min-h-screen lg:grid-cols-[0.72fr_1.28fr]">
         {/* COMPACT LEFT PANEL */}
 
         <motion.section
@@ -805,7 +1038,7 @@ function Register() {
             duration: 0.75,
             ease: [0.22, 1, 0.36, 1],
           }}
-          className="relative hidden overflow-hidden bg-[#061b51] text-white lg:block"
+          className="relative hidden overflow-hidden bg-[#061b51] text-white lg:sticky lg:top-0 lg:block lg:h-screen"
         >
           <div
             className="absolute inset-0 bg-cover bg-center"
@@ -988,7 +1221,7 @@ function Register() {
 
         {/* COMPACT WIZARD PANEL */}
 
-        <section className="relative flex min-h-screen items-center justify-center px-4 py-5 sm:px-6 lg:h-screen lg:min-h-0 lg:px-8 lg:py-4 xl:px-12">
+        <section className="relative flex min-h-screen items-start justify-center px-3 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-8 xl:px-12">
           <motion.div
             initial={{
               opacity: 0,
@@ -1004,7 +1237,7 @@ function Register() {
               duration: 0.65,
               ease: [0.22, 1, 0.36, 1],
             }}
-            className="w-full max-w-3xl"
+            className="my-auto w-full max-w-3xl"
           >
             <div className="overflow-hidden rounded-[1.75rem] border border-white/80 bg-white/95 shadow-[0_24px_65px_rgba(15,23,42,0.15)] backdrop-blur-xl">
               {/* HEADER */}
@@ -1127,7 +1360,7 @@ function Register() {
                 onSubmit={handleSubmit}
                 className="px-5 pb-5 pt-4 sm:px-7 sm:pb-6"
               >
-                <div className="relative min-h-[300px] sm:min-h-[315px]">
+                <div className="relative min-h-[300px]">
                   <AnimatePresence
                     mode="wait"
                     custom={
@@ -1479,6 +1712,267 @@ function Register() {
                             </SelectField>
                           </div>
 
+                          <div className="mt-5">
+                            <p className="text-xs font-bold uppercase tracking-[0.08em] text-slate-600">
+                              Student Classification
+                            </p>
+
+                            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                              {[
+                                {
+                                  value: "Regular",
+                                  title: "Regular Student",
+                                  description:
+                                    "Your subjects follow your official home section.",
+                                },
+                                {
+                                  value: "Irregular",
+                                  title: "Irregular Student",
+                                  description:
+                                    "Select the subjects in which you are currently irregular.",
+                                },
+                              ].map(
+                                (option) => {
+                                  const selected =
+                                    formData.student_type ===
+                                    option.value;
+
+                                  return (
+                                    <motion.button
+                                      key={option.value}
+                                      type="button"
+                                      whileTap={{
+                                        scale: 0.985,
+                                      }}
+                                      onClick={() =>
+                                        selectStudentType(
+                                          option.value
+                                        )
+                                      }
+                                      className={`flex items-start gap-3 rounded-xl border p-4 text-left transition ${
+                                        selected
+                                          ? "border-blue-500 bg-blue-50 shadow-sm"
+                                          : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50"
+                                      }`}
+                                    >
+                                      <span
+                                        className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                                          selected
+                                            ? "bg-blue-700 text-white"
+                                            : "bg-slate-100 text-slate-500"
+                                        }`}
+                                      >
+                                        <FaUserGraduate />
+                                      </span>
+
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block text-sm font-black text-slate-900">
+                                          {option.title}
+                                        </span>
+
+                                        <span className="mt-1 block text-xs leading-5 text-slate-500">
+                                          {option.description}
+                                        </span>
+                                      </span>
+
+                                      <span
+                                        className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+                                          selected
+                                            ? "border-blue-700 bg-blue-700 text-white"
+                                            : "border-slate-300 bg-white"
+                                        }`}
+                                      >
+                                        {selected && (
+                                          <FaCheck className="text-[9px]" />
+                                        )}
+                                      </span>
+                                    </motion.button>
+                                  );
+                                }
+                              )}
+                            </div>
+                          </div>
+
+                          <AnimatePresence>
+                            {formData.student_type ===
+                              "Irregular" && (
+                              <motion.section
+                                initial={{
+                                  opacity: 0,
+                                  y: 12,
+                                }}
+                                animate={{
+                                  opacity: 1,
+                                  y: 0,
+                                }}
+                                exit={{
+                                  opacity: 0,
+                                  y: -8,
+                                }}
+                                className="mt-5 overflow-hidden rounded-2xl border border-amber-200 bg-amber-50/50"
+                              >
+                                <div className="border-b border-amber-100 bg-white/70 p-4">
+                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                      <h3 className="font-black text-slate-900">
+                                        Select Irregular Subjects
+                                      </h3>
+
+                                      <p className="mt-1 text-xs leading-5 text-slate-500">
+                                        Your selections will still be verified by the Administrator.
+                                      </p>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-2 self-start sm:self-center">
+                                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">
+                                        {subjectSearch.trim()
+                                          ? `${filteredSubjects.length} shown`
+                                          : `${subjects.length} available`}
+                                      </span>
+
+                                      <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-700">
+                                        {formData.irregular_subject_ids.length} selected
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <label className="relative mt-3 block">
+                                    <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+
+                                    <input
+                                      type="search"
+                                      value={subjectSearch}
+                                      onChange={(event) =>
+                                        setSubjectSearch(
+                                          event.target.value
+                                        )
+                                      }
+                                      placeholder="Search code, subject, program, year, or semester..."
+                                      className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-11 pr-20 text-sm outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+                                    />
+
+                                    {subjectSearch && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setSubjectSearch(
+                                            ""
+                                          )
+                                        }
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-black text-blue-700 transition hover:bg-blue-50"
+                                      >
+                                        Clear
+                                      </button>
+                                    )}
+                                  </label>
+                                </div>
+
+                                <div className="h-64 space-y-2 overflow-y-scroll overscroll-contain p-3 touch-pan-y [scrollbar-gutter:stable] sm:h-80 sm:p-4 lg:h-96">
+                                  {loadingSubjects ? (
+                                    <div className="py-10 text-center text-sm font-semibold text-slate-500">
+                                      Loading subjects...
+                                    </div>
+                                  ) : subjectLoadError ? (
+                                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-8 text-center">
+                                      <FaBookOpen className="mx-auto text-3xl text-red-300" />
+
+                                      <p className="mt-3 text-sm font-black text-red-700">
+                                        Unable to load subjects
+                                      </p>
+
+                                      <p className="mt-1 break-words text-xs leading-5 text-red-500">
+                                        {subjectLoadError}
+                                      </p>
+                                    </div>
+                                  ) : filteredSubjects.length ===
+                                    0 ? (
+                                    <div className="py-10 text-center">
+                                      <FaBookOpen className="mx-auto text-3xl text-slate-300" />
+
+                                      <p className="mt-3 text-sm font-bold text-slate-600">
+                                        No matching subjects found
+                                      </p>
+
+                                      <p className="mt-1 text-xs leading-5 text-slate-400">
+                                        {subjects.length === 0
+                                          ? "No active subjects are readable on the public registration page. Apply the included Supabase read policy."
+                                          : "Clear the search field or search using another code, name, program, year level, or semester."}
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    filteredSubjects.map(
+                                      (subject) => {
+                                        const selected =
+                                          formData.irregular_subject_ids.includes(
+                                            subject.id
+                                          );
+
+                                        const subjectCode =
+                                          subject.subject_code ||
+                                          subject.code ||
+                                          "SUBJECT";
+
+                                        const subjectName =
+                                          subject.subject_name ||
+                                          subject.name ||
+                                          subject.title ||
+                                          "Unnamed Subject";
+
+                                        return (
+                                          <motion.button
+                                            key={subject.id}
+                                            type="button"
+                                            whileTap={{
+                                              scale: 0.99,
+                                            }}
+                                            onClick={() =>
+                                              toggleIrregularSubject(
+                                                subject.id
+                                              )
+                                            }
+                                            className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition sm:p-4 ${
+                                              selected
+                                                ? "border-blue-400 bg-blue-50"
+                                                : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50"
+                                            }`}
+                                          >
+                                            <span
+                                              className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
+                                                selected
+                                                  ? "border-blue-700 bg-blue-700 text-white"
+                                                  : "border-slate-300 bg-white"
+                                              }`}
+                                            >
+                                              {selected && (
+                                                <FaCheck className="text-[9px]" />
+                                              )}
+                                            </span>
+
+                                            <span className="min-w-0 flex-1">
+                                              <span className="block text-sm font-black text-slate-900">
+                                                {subjectCode} — {subjectName}
+                                              </span>
+
+                                              <span className="mt-1 block text-xs text-slate-500">
+                                                {[
+                                                  subject.year_level,
+                                                  subject.semester,
+                                                ]
+                                                  .filter(Boolean)
+                                                  .join(" • ") ||
+                                                  "For Administrator verification"}
+                                              </span>
+                                            </span>
+                                          </motion.button>
+                                        );
+                                      }
+                                    )
+                                  )}
+                                </div>
+                              </motion.section>
+                            )}
+                          </AnimatePresence>
+
                           <AnimatePresence>
                             {selectedCourse &&
                               formData.year_level &&
@@ -1658,7 +2152,7 @@ function Register() {
 
                 {/* ACTIONS */}
 
-                <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                <div className="mt-4 flex flex-col-reverse gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
                   <button
                     type="button"
                     onClick={
@@ -1668,7 +2162,7 @@ function Register() {
                       currentStep === 0 ||
                       submitting
                     }
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
                   >
                     <FaArrowLeft />
                     Back
@@ -1682,7 +2176,7 @@ function Register() {
                         submitting ||
                         loadingCourses
                       }
-                      className="group min-w-44 !rounded-xl !bg-gradient-to-r !from-blue-700 !via-blue-600 !to-indigo-600 shadow-[0_12px_26px_rgba(37,99,235,0.28)] transition hover:-translate-y-0.5"
+                      className="group w-full !rounded-xl !bg-gradient-to-r !from-blue-700 !via-blue-600 !to-indigo-600 shadow-[0_12px_26px_rgba(37,99,235,0.28)] transition hover:-translate-y-0.5 sm:min-w-44 sm:w-auto"
                     >
                       <span className="flex items-center justify-center gap-2">
                         {submitting
@@ -1700,7 +2194,7 @@ function Register() {
                       onClick={
                         goToNextStep
                       }
-                      className="group inline-flex h-11 min-w-36 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-700 to-indigo-600 px-5 text-sm font-bold text-white shadow-[0_12px_26px_rgba(37,99,235,0.25)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_30px_rgba(37,99,235,0.3)]"
+                      className="group inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-700 to-indigo-600 px-5 text-sm font-bold text-white shadow-[0_12px_26px_rgba(37,99,235,0.25)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_30px_rgba(37,99,235,0.3)] sm:min-w-36 sm:w-auto"
                     >
                       Continue
 

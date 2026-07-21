@@ -26,21 +26,9 @@ function ResponsivePortalLayout({
     setSidebarOpen,
   ] = useState(false);
 
-  /*
-  |--------------------------------------------------------------------------
-  | CLOSE MOBILE DRAWER AFTER NAVIGATION
-  |--------------------------------------------------------------------------
-  */
-
   useEffect(() => {
     setSidebarOpen(false);
   }, [location.pathname]);
-
-  /*
-  |--------------------------------------------------------------------------
-  | PREVENT PAGE SCROLL WHILE MOBILE DRAWER IS OPEN
-  |--------------------------------------------------------------------------
-  */
 
   useEffect(() => {
     if (!sidebarOpen) {
@@ -61,8 +49,6 @@ function ResponsivePortalLayout({
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-slate-100">
-      {/* Mobile backdrop */}
-
       <button
         type="button"
         aria-label="Close navigation menu"
@@ -75,8 +61,6 @@ function ResponsivePortalLayout({
             : "pointer-events-none opacity-0"
         }`}
       />
-
-      {/* Existing role sidebar inside a responsive drawer */}
 
       <div
         className={`fixed inset-y-0 left-0 z-[70] w-72 max-w-[88vw] transform transition-transform duration-300 ease-out lg:translate-x-0 ${
@@ -98,8 +82,6 @@ function ResponsivePortalLayout({
           <FaTimes />
         </button>
       </div>
-
-      {/* Mobile top header */}
 
       <header className="fixed inset-x-0 top-0 z-[60] flex h-16 items-center justify-between border-b border-slate-200/80 bg-white/95 px-3 shadow-sm backdrop-blur sm:px-4 lg:hidden">
         <div className="flex min-w-0 items-center gap-3">
@@ -133,16 +115,12 @@ function ResponsivePortalLayout({
         </div>
       </header>
 
-      {/* Responsive page area */}
-
       <div className="min-w-0 lg:ml-72">
-        {/* Keep the current desktop topbar unchanged */}
-
         <div className="hidden lg:block">
           <TopbarComponent />
         </div>
 
-        <main className="min-h-screen min-w-0 px-3 pb-6 pt-20 sm:px-4 lg:px-6 lg:pb-8 lg:pt-24">
+        <main className="min-w-0 px-3 pb-6 pt-20 sm:px-4 lg:min-h-[calc(100vh-4rem)] lg:px-6 lg:pb-8 lg:pt-6">
           {children}
         </main>
       </div>

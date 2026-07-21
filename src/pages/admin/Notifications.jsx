@@ -6,6 +6,7 @@ import {
 } from "react";
 import Swal from "sweetalert2";
 import { AnimatePresence, motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 
 import AdminLayout from "../../layouts/AdminLayout";
 
@@ -14,6 +15,7 @@ import schoolLogo from "../../assets/cctc-logo.jpg";
 import { supabase } from "../../services/supabase";
 
 import {
+  FaArrowRight,
   FaBell,
   FaCheckCircle,
   FaExclamationCircle,
@@ -198,6 +200,263 @@ const getRoleBadgeClass = (role) => {
   }
 };
 
+const resolveAdminNotificationRoute = (
+  notification
+) => {
+  const rawActionUrl =
+    String(
+      notification?.action_url ||
+        ""
+    ).trim();
+
+  if (rawActionUrl) {
+    try {
+      const parsedUrl =
+        new URL(
+          rawActionUrl,
+          window.location.origin
+        );
+
+      if (
+        parsedUrl.origin ===
+        window.location.origin
+      ) {
+        const pathname =
+          parsedUrl.pathname;
+
+        if (
+          pathname.startsWith(
+            "/admin/"
+          )
+        ) {
+          return `${pathname}${parsedUrl.search}${parsedUrl.hash}`;
+        }
+
+        if (
+          pathname.includes(
+            "clearance"
+          ) ||
+          pathname.includes(
+            "request"
+          ) ||
+          pathname.includes(
+            "submission"
+          )
+        ) {
+          return "/admin/clearances";
+        }
+
+        if (
+          pathname.includes(
+            "approver"
+          )
+        ) {
+          return "/admin/approver-management";
+        }
+
+        if (
+          pathname.includes(
+            "student"
+          )
+        ) {
+          return "/admin/students";
+        }
+      }
+    } catch (error) {
+      console.warn(
+        "Invalid notification action URL:",
+        rawActionUrl,
+        error
+      );
+    }
+  }
+
+  const entityType =
+    String(
+      notification?.entity_type ||
+        ""
+    )
+      .trim()
+      .toLowerCase();
+
+  const searchableContent =
+    [
+      notification?.title,
+      notification?.message,
+      entityType,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+  if (
+    entityType.includes(
+      "clearance"
+    ) ||
+    entityType.includes(
+      "submission"
+    ) ||
+    entityType.includes(
+      "requirement"
+    ) ||
+    searchableContent.includes(
+      "clearance"
+    ) ||
+    searchableContent.includes(
+      "requirement"
+    ) ||
+    searchableContent.includes(
+      "approved"
+    ) ||
+    searchableContent.includes(
+      "rejected"
+    )
+  ) {
+    return "/admin/clearances";
+  }
+
+  if (
+    entityType.includes(
+      "class"
+    ) ||
+    entityType.includes(
+      "offering"
+    ) ||
+    entityType.includes(
+      "section"
+    )
+  ) {
+    return "/admin/class-assignments";
+  }
+
+  if (
+    entityType.includes(
+      "subject"
+    )
+  ) {
+    return "/admin/subjects";
+  }
+
+  if (
+    entityType.includes(
+      "course"
+    )
+  ) {
+    return "/admin/courses";
+  }
+
+  if (
+    entityType.includes(
+      "office"
+    )
+  ) {
+    return "/admin/offices";
+  }
+
+  if (
+    entityType.includes(
+      "approver"
+    ) ||
+    notification?.recipient
+      ?.role === "Approver"
+  ) {
+    return "/admin/approver-management";
+  }
+
+  if (
+    entityType.includes(
+      "student"
+    ) ||
+    entityType.includes(
+      "registration"
+    ) ||
+    notification?.recipient
+      ?.role === "Student"
+  ) {
+    return "/admin/students";
+  }
+
+  if (
+    entityType.includes(
+      "user"
+    )
+  ) {
+    return "/admin/users";
+  }
+
+  return "/admin/dashboard";
+};
+
+const getAdminNotificationActionLabel = (
+  route
+) => {
+  if (
+    route.includes(
+      "/admin/clearances"
+    )
+  ) {
+    return "Open Clearance Records";
+  }
+
+  if (
+    route.includes(
+      "/admin/students"
+    )
+  ) {
+    return "Open Student Management";
+  }
+
+  if (
+    route.includes(
+      "/admin/approver-management"
+    )
+  ) {
+    return "Open Approver Management";
+  }
+
+  if (
+    route.includes(
+      "/admin/class-assignments"
+    )
+  ) {
+    return "Open Class Assignments";
+  }
+
+  if (
+    route.includes(
+      "/admin/subjects"
+    )
+  ) {
+    return "Open Subject Management";
+  }
+
+  if (
+    route.includes(
+      "/admin/courses"
+    )
+  ) {
+    return "Open Course Management";
+  }
+
+  if (
+    route.includes(
+      "/admin/offices"
+    )
+  ) {
+    return "Open Office Management";
+  }
+
+  if (
+    route.includes(
+      "/admin/users"
+    )
+  ) {
+    return "Open User Management";
+  }
+
+  return "Open Dashboard";
+};
+
 /*
 |--------------------------------------------------------------------------
 | COMPONENT
@@ -205,6 +464,9 @@ const getRoleBadgeClass = (role) => {
 */
 
 function Notifications() {
+  const navigate =
+    useNavigate();
+
   const [admin, setAdmin] = useState(null);
   const [notifications, setNotifications] =
     useState([]);
@@ -585,6 +847,42 @@ function Notifications() {
     setReadFilter("All");
   };
 
+  const openNotificationRecord = (
+    notification
+  ) => {
+    const destination =
+      resolveAdminNotificationRoute(
+        notification
+      );
+
+    /*
+    The Administrator is monitoring notifications delivered to all roles.
+    Opening a record must not mark another user's notification as read.
+    */
+
+    navigate(
+      destination,
+      {
+        state: {
+          source:
+            "admin-notification",
+          notification,
+          focus: {
+            entityType:
+              notification.entity_type ||
+              null,
+            entityId:
+              notification.entity_id ||
+              null,
+            recipientId:
+              notification.user_id ||
+              null,
+          },
+        },
+      }
+    );
+  };
+
   /*
   |--------------------------------------------------------------------------
   | LOADING
@@ -958,12 +1256,38 @@ function Notifications() {
                   notification.recipient;
 
                 return (
-                  <div
+                  <motion.div
                     key={notification.id}
-                    className={`p-6 transition hover:bg-slate-50 ${
+                    role="button"
+                    tabIndex={0}
+                    whileHover={{
+                      y: -2,
+                    }}
+                    whileTap={{
+                      scale: 0.995,
+                    }}
+                    onClick={() =>
+                      openNotificationRecord(
+                        notification
+                      )
+                    }
+                    onKeyDown={(event) => {
+                      if (
+                        event.key ===
+                          "Enter" ||
+                        event.key === " "
+                      ) {
+                        event.preventDefault();
+
+                        openNotificationRecord(
+                          notification
+                        );
+                      }
+                    }}
+                    className={`cursor-pointer p-6 outline-none transition focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-blue-200 ${
                       notification.is_read
-                        ? "bg-white"
-                        : "bg-blue-50/40"
+                        ? "bg-white hover:bg-slate-50"
+                        : "bg-blue-50/40 hover:bg-blue-50/70"
                     }`}
                   >
                     <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
@@ -1120,18 +1444,19 @@ function Notifications() {
                             </span>
                           )}
 
-                          {notification.action_url && (
-                            <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                              Action:{" "}
-                              {
-                                notification.action_url
-                              }
-                            </span>
-                          )}
+                          <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+                            <FaArrowRight />
+
+                            {getAdminNotificationActionLabel(
+                              resolveAdminNotificationRoute(
+                                notification
+                              )
+                            )}
+                          </span>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </motion.div>
                 );
               }
             )}

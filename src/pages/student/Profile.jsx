@@ -44,6 +44,8 @@ import schoolLogo from "../../assets/cctc-logo.jpg";
 const createEditForm = () => ({
   full_name: "",
   email: "",
+  contact_number: "",
+  address: "",
 });
 
 const createPasswordForm = () => ({
@@ -227,6 +229,19 @@ function Profile() {
             email:
               profileData.email ||
               user.email ||
+              "",
+            contact_number:
+              profileData.contact_number ||
+              profileData.phone ||
+              profileData.mobile_number ||
+              user.user_metadata
+                ?.contact_number ||
+              "",
+            address:
+              profileData.address ||
+              profileData.home_address ||
+              user.user_metadata
+                ?.address ||
               "",
           });
 
@@ -581,6 +596,14 @@ function Profile() {
         full_name:
           displayName,
         email,
+        contact_number:
+          phone === "Not provided"
+            ? ""
+            : phone,
+        address:
+          address === "Not provided"
+            ? ""
+            : address,
       });
 
       setShowEditModal(
@@ -640,6 +663,14 @@ function Profile() {
           .trim()
           .toLowerCase();
 
+      const contactNumber =
+        editForm.contact_number
+          .trim();
+
+      const homeAddress =
+        editForm.address
+          .trim();
+
       if (!fullName) {
         await Swal.fire({
           icon:
@@ -679,6 +710,12 @@ function Profile() {
           data: {
             full_name:
               fullName,
+            contact_number:
+              contactNumber ||
+              null,
+            address:
+              homeAddress ||
+              null,
           },
         };
 
@@ -704,17 +741,58 @@ function Profile() {
           throw authUpdateError;
         }
 
+        const profileUpdatePayload = {
+          full_name:
+            fullName,
+          email:
+            normalizedEmail,
+        };
+
+        const contactColumn = [
+          "contact_number",
+          "phone",
+          "mobile_number",
+        ].find((column) =>
+          Object.prototype.hasOwnProperty.call(
+            profile,
+            column
+          )
+        );
+
+        const addressColumn = [
+          "address",
+          "home_address",
+        ].find((column) =>
+          Object.prototype.hasOwnProperty.call(
+            profile,
+            column
+          )
+        );
+
+        if (contactColumn) {
+          profileUpdatePayload[
+            contactColumn
+          ] =
+            contactNumber ||
+            null;
+        }
+
+        if (addressColumn) {
+          profileUpdatePayload[
+            addressColumn
+          ] =
+            homeAddress ||
+            null;
+        }
+
         const {
           error:
             profileUpdateError,
         } = await supabase
           .from("users")
-          .update({
-            full_name:
-              fullName,
-            email:
-              normalizedEmail,
-          })
+          .update(
+            profileUpdatePayload
+          )
           .eq(
             "id",
             profile.id
@@ -743,7 +821,7 @@ function Profile() {
             normalizedEmail !==
             authUser?.email
               ? "Your profile was updated. Supabase may require verification before the new email becomes active."
-              : "Your account information was updated successfully.",
+              : "Your personal account information was updated successfully.",
           timer: 2200,
           showConfirmButton:
             false,
@@ -1497,10 +1575,51 @@ function Profile() {
                     />
                   </label>
 
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-700">
+                      Contact Number
+                    </span>
+
+                    <input
+                      type="tel"
+                      name="contact_number"
+                      value={
+                        editForm.contact_number
+                      }
+                      onChange={
+                        handleEditChange
+                      }
+                      placeholder="Example: 09XX XXX XXXX"
+                      autoComplete="tel"
+                      className="h-12 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-700">
+                      Home Address
+                    </span>
+
+                    <textarea
+                      name="address"
+                      value={
+                        editForm.address
+                      }
+                      onChange={
+                        handleEditChange
+                      }
+                      placeholder="Enter your current home address"
+                      rows="3"
+                      autoComplete="street-address"
+                      className="w-full resize-y rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+                    />
+                  </label>
+
                   <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-xs leading-5 text-blue-700">
-                    Student number, course, year level, block, semester, and
-                    school year are verified academic records and cannot be
-                    edited here.
+                    You may edit your name, email, contact number, and
+                    address. Student number, course, year level, block,
+                    semester, and school year are verified academic records
+                    and can only be changed by the Administrator.
                   </div>
 
                   <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">

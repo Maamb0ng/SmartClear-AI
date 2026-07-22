@@ -39,13 +39,17 @@ import {
 */
 
 const STORAGE_BUCKET = "clearance-requirements";
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
-const ALLOWED_FILE_TYPES = [
+const DEFAULT_MAX_FILE_SIZE_MB = 10;
+
+const DEFAULT_ALLOWED_FILE_TYPES = [
   "application/pdf",
   "image/jpeg",
   "image/png",
 ];
+
+const DEFAULT_FILE_ACCEPT =
+  ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
 
 /*
 |--------------------------------------------------------------------------
@@ -117,16 +121,309 @@ const getOverallStatusStyle = (status) => {
   return "bg-yellow-100 text-yellow-700";
 };
 
+const getRequirement = (step) => {
+  return step?.subjectRequirement || null;
+};
+
+const isPastDeadline = (requirement) => {
+  if (!requirement?.deadline) return false;
+
+  const deadline = new Date(requirement.deadline);
+
+  return (
+    !Number.isNaN(deadline.getTime()) &&
+    deadline.getTime() < Date.now()
+  );
+};
+
+const subjectNeedsStudentSubmission = (step) => {
+  const requirement = getRequirement(step);
+
+  return Boolean(
+    step?.subject_id &&
+      requirement?.is_active &&
+      requirement.submission_type !== "No Submission"
+  );
+};
+
+const stepAllowsText = (step) => {
+  if (!step?.subject_id) return true;
+
+  const submissionType =
+    getRequirement(step)?.submission_type;
+
+  return (
+    submissionType === "Text" ||
+    submissionType === "File or Text"
+  );
+};
+
+const stepAllowsFile = (step) => {
+  if (!step?.subject_id) return true;
+
+  const submissionType =
+    getRequirement(step)?.submission_type;
+
+  return (
+    submissionType === "File" ||
+    submissionType === "File or Text"
+  );
+};
+
+const isSubmissionWindowOpen = (step) => {
+  if (!step?.subject_id) return true;
+
+  const requirement = getRequirement(step);
+
+  return Boolean(
+    subjectNeedsStudentSubmission(step) &&
+      requirement?.is_open === true &&
+      !isPastDeadline(requirement)
+  );
+};
+
+const getSubmissionBlockedReason = (step) => {
+  if (!step?.subject_id) return null;
+
+  const requirement = getRequirement(step);
+
+  if (!requirement || !requirement.is_active) {
+    return {
+      key: "waiting",
+      title: "Waiting for Teacher to Open Submission",
+      message:
+        "You cannot submit this requirement yet because the assigned teacher has not posted and activated the submission instructions.",
+    };
+  }
+
+  if (
+    requirement.submission_type ===
+    "No Submission"
+  ) {
+    return {
+      key: "faculty-review",
+      title: "Teacher Review Only",
+      message:
+        "No student upload is required for this subject. The assigned teacher will review and clear this step directly.",
+    };
+  }
+
+  if (isPastDeadline(requirement)) {
+    return {
+      key: "deadline",
+      title: "Submission Deadline Passed",
+      message:
+        "The submission period has ended. Contact the assigned teacher if this requirement must be reopened.",
+    };
+  }
+
+  if (requirement.is_open !== true) {
+    return {
+      key: "closed",
+      title: "Submission Not Yet Open",
+      message:
+        "The assigned teacher has not opened submissions yet or has temporarily closed the submission window.",
+    };
+  }
+
+  return null;
+};
+
 const getDisplayedStepStatus = (step) => {
+  if (step.status === "Approved") {
+    return "Approved";
+  }
+
+  if (step.status === "Rejected") {
+    return "Needs Correction";
+  }
+
   if (step.status === "Pending" && step.submission) {
     return "Under Review";
   }
 
   if (step.status === "Pending") {
-    return "Not Submitted";
+    return isSubmissionWindowOpen(step)
+      ? "Ready to Submit"
+      : "Not Submitted";
   }
 
   return step.status;
+};
+
+const getDisplayedStepStatusStyle = (step) => {
+  if (step.status === "Approved") {
+    return "bg-green-100 text-green-700";
+  }
+
+  if (
+    step.status === "Pending" &&
+    step.submission
+  ) {
+    return "bg-blue-100 text-blue-700";
+  }
+
+  if (step.status === "Rejected") {
+    return "bg-red-100 text-red-700";
+  }
+
+  const blockedReason =
+    getSubmissionBlockedReason(step);
+
+  if (blockedReason?.key === "deadline") {
+    return "bg-red-100 text-red-700";
+  }
+
+  if (
+    blockedReason?.key === "faculty-review"
+  ) {
+    return "bg-slate-200 text-slate-700";
+  }
+
+  if (blockedReason) {
+    return "bg-amber-100 text-amber-700";
+  }
+
+  return "bg-emerald-100 text-emerald-700";
+};
+
+const getStepWorkflowRank = (step) => {
+  const blockedReason =
+    getSubmissionBlockedReason(step);
+
+  if (
+    (step.status === "Rejected" ||
+      (step.status === "Pending" &&
+        !step.submission)) &&
+    !blockedReason
+  ) {
+    return 0;
+  }
+
+  if (blockedReason) {
+    return 1;
+  }
+
+  if (
+    step.status === "Pending" &&
+    step.submission
+  ) {
+    return 2;
+  }
+
+  if (step.status === "Approved") {
+    return 3;
+  }
+
+  return 4;
+};
+
+const normalizeFileType = (value) => {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+};
+
+const getStepMaxFileSizeMb = (step) => {
+  const configuredSize = Number(
+    getRequirement(step)?.max_file_size_mb
+  );
+
+  if (
+    Number.isFinite(configuredSize) &&
+    configuredSize > 0
+  ) {
+    return configuredSize;
+  }
+
+  return DEFAULT_MAX_FILE_SIZE_MB;
+};
+
+const getStepAllowedFileTypes = (step) => {
+  const configuredTypes =
+    getRequirement(step)?.allowed_file_types;
+
+  if (
+    Array.isArray(configuredTypes) &&
+    configuredTypes.length > 0
+  ) {
+    return configuredTypes
+      .map(normalizeFileType)
+      .filter(Boolean);
+  }
+
+  return DEFAULT_ALLOWED_FILE_TYPES;
+};
+
+const fileMatchesAllowedType = (
+  file,
+  allowedTypes
+) => {
+  const fileType = normalizeFileType(file?.type);
+  const fileName = normalizeFileType(file?.name);
+
+  const fileExtension = fileName.includes(".")
+    ? `.${fileName.split(".").pop()}`
+    : "";
+
+  return allowedTypes.some((allowedType) => {
+    const normalized =
+      normalizeFileType(allowedType);
+
+    if (!normalized) return false;
+
+    if (normalized.startsWith(".")) {
+      return fileExtension === normalized;
+    }
+
+    if (normalized.includes("/")) {
+      return fileType === normalized;
+    }
+
+    return (
+      fileExtension === `.${normalized}` ||
+      fileType.endsWith(`/${normalized}`)
+    );
+  });
+};
+
+const getFileAcceptValue = (step) => {
+  const configuredTypes =
+    getRequirement(step)?.allowed_file_types;
+
+  if (
+    !Array.isArray(configuredTypes) ||
+    configuredTypes.length === 0
+  ) {
+    return DEFAULT_FILE_ACCEPT;
+  }
+
+  return configuredTypes
+    .map(normalizeFileType)
+    .filter(Boolean)
+    .map((type) => {
+      if (
+        type.startsWith(".") ||
+        type.includes("/")
+      ) {
+        return type;
+      }
+
+      return `.${type}`;
+    })
+    .join(",");
+};
+
+const formatAllowedFileTypes = (step) => {
+  return getStepAllowedFileTypes(step)
+    .map((type) =>
+      type
+        .replace("application/", "")
+        .replace("image/", "")
+        .replace(".", "")
+        .toUpperCase()
+    )
+    .join(", ");
 };
 
 const sanitizeFileName = (fileName) => {
@@ -158,6 +455,52 @@ const escapeHtml = (value) => {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+};
+
+const createUniqueId = () => {
+  if (
+    typeof globalThis.crypto?.randomUUID ===
+    "function"
+  ) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  if (
+    typeof globalThis.crypto?.getRandomValues ===
+    "function"
+  ) {
+    const bytes = new Uint8Array(16);
+
+    globalThis.crypto.getRandomValues(bytes);
+
+    bytes[6] =
+      (bytes[6] & 0x0f) | 0x40;
+
+    bytes[8] =
+      (bytes[8] & 0x3f) | 0x80;
+
+    const hex = Array.from(
+      bytes,
+      (byte) =>
+        byte
+          .toString(16)
+          .padStart(2, "0")
+    );
+
+    return [
+      hex.slice(0, 4).join(""),
+      hex.slice(4, 6).join(""),
+      hex.slice(6, 8).join(""),
+      hex.slice(8, 10).join(""),
+      hex.slice(10, 16).join(""),
+    ].join("-");
+  }
+
+  return [
+    Date.now().toString(36),
+    Math.random().toString(36).slice(2, 10),
+    Math.random().toString(36).slice(2, 10),
+  ].join("-");
 };
 
 function RequestClearance() {
@@ -462,6 +805,9 @@ function RequestClearance() {
               allowed_file_types,
               max_file_size_mb,
               is_active,
+              is_open,
+              opened_at,
+              closed_at,
               created_at,
               updated_at
             `)
@@ -706,6 +1052,63 @@ function RequestClearance() {
     };
   }, [steps]);
 
+  const organizedSteps = useMemo(() => {
+    return [...steps].sort((first, second) => {
+      const rankDifference =
+        getStepWorkflowRank(first) -
+        getStepWorkflowRank(second);
+
+      if (rankDifference !== 0) {
+        return rankDifference;
+      }
+
+      return getStepName(first).localeCompare(
+        getStepName(second)
+      );
+    });
+  }, [steps]);
+
+  const submissionOverview = useMemo(() => {
+    const ready = steps.filter((step) => {
+      const needsStudentAction =
+        step.status === "Rejected" ||
+        (step.status === "Pending" &&
+          !step.submission);
+
+      return (
+        needsStudentAction &&
+        !getSubmissionBlockedReason(step)
+      );
+    }).length;
+
+    const waitingToOpen = steps.filter(
+      (step) =>
+        Boolean(
+          getSubmissionBlockedReason(step)
+        ) &&
+        (step.status === "Rejected" ||
+          (step.status === "Pending" &&
+            !step.submission))
+    ).length;
+
+    const underReview = steps.filter(
+      (step) =>
+        step.status === "Pending" &&
+        Boolean(step.submission)
+    ).length;
+
+    const completed = steps.filter(
+      (step) => step.status === "Approved"
+    ).length;
+
+    return {
+      ready,
+      waitingToOpen,
+      underReview,
+      completed,
+    };
+  }, [steps]);
+
   /*
   |--------------------------------------------------------------------------
   | CURRENT CLEARANCE CYCLE CHECK
@@ -854,9 +1257,9 @@ function RequestClearance() {
   |--------------------------------------------------------------------------
   */
 
-  const openSubmissionModal = (step) => {
+  const openSubmissionModal = async (step) => {
     if (step.status === "Approved") {
-      Swal.fire({
+      await Swal.fire({
         icon: "info",
         title: "Already Approved",
         text:
@@ -866,11 +1269,27 @@ function RequestClearance() {
       return;
     }
 
+    const blockedReason =
+      getSubmissionBlockedReason(step);
+
+    if (blockedReason) {
+      await Swal.fire({
+        icon:
+          blockedReason.key === "deadline"
+            ? "warning"
+            : "info",
+        title: blockedReason.title,
+        text: blockedReason.message,
+      });
+
+      return;
+    }
+
     if (
       step.status === "Pending" &&
       step.submission
     ) {
-      Swal.fire({
+      await Swal.fire({
         icon: "info",
         title: "Waiting for Review",
         text:
@@ -905,7 +1324,7 @@ function RequestClearance() {
   |--------------------------------------------------------------------------
   */
 
-  const handleFileChange = (event) => {
+  const handleFileChange = async (event) => {
     const file =
       event.target.files?.[0] || null;
 
@@ -914,31 +1333,60 @@ function RequestClearance() {
       return;
     }
 
-    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+    if (
+      selectedStep &&
+      !stepAllowsFile(selectedStep)
+    ) {
       event.target.value = "";
-
       setSelectedFile(null);
 
-      Swal.fire({
+      await Swal.fire({
         icon: "warning",
-        title: "Invalid File Type",
+        title: "File Not Allowed",
         text:
-          "Only PDF, JPG, JPEG, and PNG files are allowed.",
+          "This requirement accepts a text response only.",
       });
 
       return;
     }
 
-    if (file.size > MAX_FILE_SIZE) {
-      event.target.value = "";
+    const allowedTypes =
+      getStepAllowedFileTypes(selectedStep);
 
+    if (
+      !fileMatchesAllowedType(
+        file,
+        allowedTypes
+      )
+    ) {
+      event.target.value = "";
       setSelectedFile(null);
 
-      Swal.fire({
+      await Swal.fire({
+        icon: "warning",
+        title: "Invalid File Type",
+        text: `Allowed file types: ${formatAllowedFileTypes(
+          selectedStep
+        )}.`,
+      });
+
+      return;
+    }
+
+    const maxFileSizeMb =
+      getStepMaxFileSizeMb(selectedStep);
+
+    const maxFileSizeBytes =
+      maxFileSizeMb * 1024 * 1024;
+
+    if (file.size > maxFileSizeBytes) {
+      event.target.value = "";
+      setSelectedFile(null);
+
+      await Swal.fire({
         icon: "warning",
         title: "File Too Large",
-        text:
-          "The attachment must not exceed 10 MB.",
+        text: `The attachment must not exceed ${maxFileSizeMb} MB.`,
       });
 
       return;
@@ -958,12 +1406,91 @@ function RequestClearance() {
 
     const cleanText = submissionText.trim();
 
-    if (!cleanText && !selectedFile) {
+    const blockedReason =
+      getSubmissionBlockedReason(selectedStep);
+
+    if (blockedReason) {
+      await Swal.fire({
+        icon:
+          blockedReason.key === "deadline"
+            ? "warning"
+            : "info",
+        title: blockedReason.title,
+        text: blockedReason.message,
+      });
+
+      return;
+    }
+
+    const allowsText =
+      stepAllowsText(selectedStep);
+
+    const allowsFile =
+      stepAllowsFile(selectedStep);
+
+    if (!allowsText && cleanText) {
+      await Swal.fire({
+        icon: "warning",
+        title: "Text Response Not Allowed",
+        text:
+          "This requirement accepts a file attachment only.",
+      });
+
+      return;
+    }
+
+    if (!allowsFile && selectedFile) {
+      await Swal.fire({
+        icon: "warning",
+        title: "File Not Allowed",
+        text:
+          "This requirement accepts a text response only.",
+      });
+
+      return;
+    }
+
+    if (
+      allowsText &&
+      !allowsFile &&
+      !cleanText
+    ) {
+      await Swal.fire({
+        icon: "warning",
+        title: "Text Response Required",
+        text:
+          "Enter the required response before submitting.",
+      });
+
+      return;
+    }
+
+    if (
+      !allowsText &&
+      allowsFile &&
+      !selectedFile
+    ) {
+      await Swal.fire({
+        icon: "warning",
+        title: "Attachment Required",
+        text:
+          "Upload the required attachment before submitting.",
+      });
+
+      return;
+    }
+
+    if (
+      allowsText &&
+      allowsFile &&
+      !cleanText &&
+      !selectedFile
+    ) {
       await Swal.fire({
         icon: "warning",
         title: "Submission Required",
         text:
-          "Enter a submission message or upload an attachment.",
+          "Enter a response or upload the requested attachment.",
       });
 
       return;
@@ -1008,7 +1535,7 @@ function RequestClearance() {
           selectedFile.name
         );
 
-        const uniqueName = `${Date.now()}-${crypto.randomUUID()}-${safeFileName}`;
+        const uniqueName = `${Date.now()}-${createUniqueId()}-${safeFileName}`;
 
         uploadedFilePath = [
           student.id,
@@ -1832,17 +2359,74 @@ function RequestClearance() {
 
           {/* Clearance Requirements */}
 
-          <div className="min-w-0 rounded-2xl bg-white p-4 shadow-lg sm:rounded-3xl sm:p-7">
+          <div className="min-w-0 overflow-hidden rounded-2xl bg-white p-3 shadow-lg sm:rounded-3xl sm:p-7">
             <div className="mb-6">
               <h2 className="text-xl font-bold text-slate-800 sm:text-2xl">
                 Clearance Requirements
               </h2>
 
               <p className="mt-2 text-slate-500">
-                Submit each requirement to its officially
-                assigned teacher or office approver.
+                Requirements are arranged by the action you
+                can take. A subject submission stays locked
+                until the assigned teacher opens it.
               </p>
             </div>
+
+            {steps.length > 0 && (
+              <div className="mb-6 grid grid-cols-1 gap-3 min-[430px]:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                  <div className="flex items-center gap-2 text-emerald-700">
+                    <FaUpload />
+                    <p className="text-xs font-bold uppercase tracking-wide">
+                      Ready to Submit
+                    </p>
+                  </div>
+
+                  <p className="mt-2 text-2xl font-black text-emerald-800">
+                    {submissionOverview.ready}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <div className="flex items-center gap-2 text-amber-700">
+                    <FaClock />
+                    <p className="text-xs font-bold uppercase tracking-wide">
+                      Waiting to Open
+                    </p>
+                  </div>
+
+                  <p className="mt-2 text-2xl font-black text-amber-800">
+                    {submissionOverview.waitingToOpen}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                  <div className="flex items-center gap-2 text-blue-700">
+                    <FaEye />
+                    <p className="text-xs font-bold uppercase tracking-wide">
+                      Under Review
+                    </p>
+                  </div>
+
+                  <p className="mt-2 text-2xl font-black text-blue-800">
+                    {submissionOverview.underReview}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-green-200 bg-green-50 p-4">
+                  <div className="flex items-center gap-2 text-green-700">
+                    <FaCheckCircle />
+                    <p className="text-xs font-bold uppercase tracking-wide">
+                      Completed
+                    </p>
+                  </div>
+
+                  <p className="mt-2 text-2xl font-black text-green-800">
+                    {submissionOverview.completed}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {steps.length === 0 ? (
               <div className="rounded-2xl border border-dashed p-10 text-center text-slate-500">
@@ -1850,24 +2434,32 @@ function RequestClearance() {
               </div>
             ) : (
               <div className="space-y-5">
-                {steps.map((step) => {
+                {organizedSteps.map((step) => {
                   const displayedStatus =
                     getDisplayedStepStatus(step);
 
+                  const blockedReason =
+                    getSubmissionBlockedReason(step);
+
+                  const submissionWindowOpen =
+                    isSubmissionWindowOpen(step);
+
                   const canSubmit =
                     step.status === "Pending" &&
-                    !step.submission;
+                    !step.submission &&
+                    submissionWindowOpen;
 
                   const canResubmit =
-                    step.status === "Rejected";
+                    step.status === "Rejected" &&
+                    submissionWindowOpen;
 
                   return (
                     <div
                       key={step.id}
-                      className="min-w-0 rounded-2xl border border-slate-200 p-4 transition hover:border-blue-300 hover:shadow-md sm:p-5"
+                      className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 p-3 transition hover:border-blue-300 hover:shadow-md sm:p-5"
                     >
-                      <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
-                        <div className="min-w-0 flex gap-3 sm:gap-4">
+                      <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex min-w-0 items-start gap-3 sm:gap-4">
                           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-xl text-blue-700 sm:h-14 sm:w-14 sm:rounded-2xl sm:text-2xl">
                             {step.subject_id ? (
                               <FaBook />
@@ -1892,9 +2484,9 @@ function RequestClearance() {
                             </p>
 
                             <div className="mt-3 flex min-w-0 items-start gap-2 text-sm text-slate-600">
-                              <FaUserCheck className="text-blue-700" />
+                              <FaUserCheck className="mt-0.5 shrink-0 text-blue-700" />
 
-                              <span>
+                              <span className="min-w-0 break-words">
                                 Approver:{" "}
                                 <strong>
                                   {step.approver
@@ -1907,8 +2499,8 @@ function RequestClearance() {
                         </div>
 
                         <span
-                          className={`w-fit rounded-full px-4 py-2 text-sm font-semibold ${getStatusStyle(
-                            step.status
+                          className={`w-full rounded-full px-4 py-2 text-center text-sm font-semibold sm:w-fit ${getDisplayedStepStatusStyle(
+                            step
                           )}`}
                         >
                           {displayedStatus}
@@ -1936,7 +2528,7 @@ function RequestClearance() {
                                 </p>
                               </div>
 
-                              <div className="flex shrink-0 flex-wrap gap-2">
+                              <div className="grid w-full shrink-0 grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap">
                                 <span className="rounded-full bg-white px-3 py-2 text-xs font-bold text-blue-700">
                                   {step.subjectRequirement.submission_type}
                                 </span>
@@ -1951,6 +2543,32 @@ function RequestClearance() {
                                   {step.subjectRequirement.is_required
                                     ? "Required"
                                     : "Optional"}
+                                </span>
+
+                                <span
+                                  className={`rounded-full px-3 py-2 text-xs font-bold ${
+                                    step.subjectRequirement.submission_type ===
+                                    "No Submission"
+                                      ? "bg-slate-200 text-slate-700"
+                                      : isPastDeadline(
+                                            step.subjectRequirement
+                                          )
+                                        ? "bg-red-100 text-red-700"
+                                        : step.subjectRequirement.is_open
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : "bg-amber-100 text-amber-700"
+                                  }`}
+                                >
+                                  {step.subjectRequirement.submission_type ===
+                                  "No Submission"
+                                    ? "Teacher Review Only"
+                                    : isPastDeadline(
+                                          step.subjectRequirement
+                                        )
+                                      ? "Deadline Passed"
+                                      : step.subjectRequirement.is_open
+                                        ? "Submission Open"
+                                        : "Submission Not Open"}
                                 </span>
                               </div>
                             </div>
@@ -1970,11 +2588,11 @@ function RequestClearance() {
 
                               <div>
                                 <p className="font-bold text-amber-700">
-                                  No Teacher Requirement Posted Yet
+                                  Submission Not Available Yet
                                 </p>
 
                                 <p className="mt-1 text-sm leading-6 text-amber-700">
-                                  The teacher has not posted specific instructions yet. You may still submit a message or attachment using the button below.
+                                  You cannot submit this subject requirement yet. The assigned teacher must post the instructions and open the submission window first.
                                 </p>
                               </div>
                             </div>
@@ -2087,7 +2705,11 @@ function RequestClearance() {
 
                       {/* Actions */}
 
-                      <div className="mt-5 grid gap-3 sm:flex sm:flex-wrap">
+                      {(canSubmit ||
+                        canResubmit ||
+                        (step.status === "Pending" &&
+                          step.submission)) && (
+                        <div className="mt-5 grid gap-3 sm:flex sm:flex-wrap">
                         {canSubmit && (
                           <button
                             type="button"
@@ -2121,7 +2743,8 @@ function RequestClearance() {
                               Waiting for Approver Review
                             </div>
                           )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -2178,29 +2801,32 @@ function RequestClearance() {
                   </div>
                 )}
 
-              <div>
-                <label
-                  htmlFor="submissionText"
-                  className="mb-2 block font-semibold text-slate-700"
-                >
-                  Submission Message
-                </label>
+              {stepAllowsText(selectedStep) && (
+                <div>
+                  <label
+                    htmlFor="submissionText"
+                    className="mb-2 block font-semibold text-slate-700"
+                  >
+                    Submission Message
+                  </label>
 
-                <textarea
-                  id="submissionText"
-                  rows="6"
-                  value={submissionText}
-                  onChange={(event) =>
-                    setSubmissionText(
-                      event.target.value
-                    )
-                  }
-                  placeholder="Describe the requirement you are submitting..."
-                  disabled={Boolean(submittingStepId)}
-                  className="w-full resize-none rounded-2xl border border-slate-200 p-4 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
-                />
-              </div>
+                  <textarea
+                    id="submissionText"
+                    rows="6"
+                    value={submissionText}
+                    onChange={(event) =>
+                      setSubmissionText(
+                        event.target.value
+                      )
+                    }
+                    placeholder="Describe the requirement you are submitting..."
+                    disabled={Boolean(submittingStepId)}
+                    className="w-full resize-none rounded-2xl border border-slate-200 p-4 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                  />
+                </div>
+              )}
 
+              {stepAllowsFile(selectedStep) && (
               <div>
                 <label
                   htmlFor="requirementFile"
@@ -2216,17 +2842,23 @@ function RequestClearance() {
                   <FaUpload className="text-4xl text-blue-700" />
 
                   <p className="mt-4 font-semibold text-slate-700">
-                    Choose PDF, JPG, JPEG, or PNG
+                    Allowed: {formatAllowedFileTypes(
+                      selectedStep
+                    )}
                   </p>
 
                   <p className="mt-2 text-sm text-slate-500">
-                    Maximum file size: 10 MB
+                    Maximum file size:{" "}
+                    {getStepMaxFileSizeMb(
+                      selectedStep
+                    )}{" "}
+                    MB
                   </p>
 
                   <input
                     id="requirementFile"
                     type="file"
-                    accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                    accept={getFileAcceptValue(selectedStep)}
                     onChange={handleFileChange}
                     disabled={Boolean(submittingStepId)}
                     className="hidden"
@@ -2269,12 +2901,15 @@ function RequestClearance() {
                   </div>
                 )}
               </div>
+              )}
 
-              <div className="rounded-2xl bg-yellow-50 p-4 text-sm text-yellow-800">
-                Your attachment is stored privately. Only
-                you, the assigned approver, and authorized
-                administrators can access it.
-              </div>
+              {stepAllowsFile(selectedStep) && (
+                <div className="rounded-2xl bg-yellow-50 p-4 text-sm text-yellow-800">
+                  Your attachment is stored privately. Only
+                  you, the assigned approver, and authorized
+                  administrators can access it.
+                </div>
+              )}
 
               <div className="flex flex-col gap-3 sm:flex-row">
                 <button

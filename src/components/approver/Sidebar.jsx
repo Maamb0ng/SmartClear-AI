@@ -13,6 +13,7 @@ import Swal from "sweetalert2";
 
 import { logoutUser } from "../../services/authService";
 import { supabase } from "../../services/supabase";
+import smartClearLogo from "../../assets/smartclear-logo.png";
 
 import {
   FaBell,
@@ -276,18 +277,32 @@ function Sidebar() {
   };
 
   return (
-    <aside className="fixed left-0 top-0 z-50 flex h-screen w-72 flex-col bg-blue-900 text-white shadow-2xl">
-      <div className="border-b border-blue-800 p-6">
-        <h1 className="text-3xl font-extrabold">
-          SmartClear AI
-        </h1>
+    <aside className="fixed left-0 top-0 z-50 flex h-screen w-72 flex-col overflow-hidden bg-blue-900 text-white shadow-2xl">
+      {/* Brand */}
 
-        <p className="mt-1 text-sm text-blue-200">
-          Approver Portal
-        </p>
+      <div className="shrink-0 border-b border-blue-800 px-5 py-4 sm:px-6 sm:py-5">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center sm:h-16 sm:w-16">
+            <img
+              src={smartClearLogo}
+              alt="SmartClear AI logo"
+              className="h-full w-full object-contain drop-shadow-[0_10px_18px_rgba(34,211,238,0.28)]"
+            />
+          </div>
+
+          <div className="min-w-0">
+            <h1 className="truncate text-2xl font-extrabold tracking-tight">
+              SmartClear AI
+            </h1>
+
+            <p className="mt-0.5 truncate text-sm text-blue-200">
+              Approver Portal
+            </p>
+          </div>
+        </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-4 py-6">
+      <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6">
         <ul className="space-y-2">
           {menuItems.map((item) => (
             <li key={item.name}>
@@ -303,11 +318,11 @@ function Sidebar() {
                   }`
                 }
               >
-                <span className="text-xl">
+                <span className="shrink-0 text-xl">
                   {item.icon}
                 </span>
 
-                <span>
+                <span className="min-w-0 truncate">
                   {item.name}
                 </span>
               </NavLink>
@@ -316,13 +331,13 @@ function Sidebar() {
         </ul>
       </nav>
 
-      <div className="border-t border-blue-800 p-4">
+      <div className="shrink-0 border-t border-blue-800 bg-blue-900 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <button
           type="button"
           onClick={handleLogout}
-          className="flex w-full items-center gap-4 rounded-xl px-4 py-3 transition hover:bg-red-600"
+          className="flex min-h-12 w-full items-center gap-4 rounded-xl px-4 py-3 transition hover:bg-red-600"
         >
-          <FaSignOutAlt />
+          <FaSignOutAlt className="shrink-0" />
 
           Logout
         </button>

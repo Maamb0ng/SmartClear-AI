@@ -18,6 +18,7 @@ import {
 } from "react-icons/fa";
 
 import { supabase } from "../../services/supabase";
+import smartClearLogo from "../../assets/smartclear-logo.png";
 
 function Sidebar() {
   const navigate = useNavigate();
@@ -108,16 +109,28 @@ function Sidebar() {
 
   return (
     <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-blue-900 text-white shadow-2xl">
-      {/* Logo */}
+      {/* Brand */}
 
-      <div className="shrink-0 border-b border-blue-800 p-6">
-        <h1 className="text-3xl font-extrabold">
-          SmartClear AI
-        </h1>
+      <div className="shrink-0 border-b border-blue-800 px-5 py-4 sm:px-6 sm:py-5">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center sm:h-16 sm:w-16">
+            <img
+              src={smartClearLogo}
+              alt="SmartClear AI logo"
+              className="h-full w-full object-contain drop-shadow-[0_10px_18px_rgba(34,211,238,0.28)]"
+            />
+          </div>
 
-        <p className="mt-1 text-sm text-blue-200">
-          Student Portal
-        </p>
+          <div className="min-w-0">
+            <h1 className="truncate text-2xl font-extrabold tracking-tight sm:text-3xl">
+              SmartClear AI
+            </h1>
+
+            <p className="mt-0.5 truncate text-sm text-blue-200">
+              Student Portal
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Navigation */}

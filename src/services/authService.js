@@ -1,5 +1,70 @@
 import { supabase } from "./supabase";
 
+const EMAIL_PATTERN =
+  /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
+
+const COMMON_EMAIL_DOMAIN_TYPOS = {
+  "gmai.com": "gmail.com",
+  "gmial.com": "gmail.com",
+  "gmal.com": "gmail.com",
+  "gmail.con": "gmail.com",
+  "gmail.co": "gmail.com",
+  "yaho.com": "yahoo.com",
+  "yahoo.con": "yahoo.com",
+  "outlok.com": "outlook.com",
+  "outllook.com": "outlook.com",
+  "hotmal.com": "hotmail.com",
+  "hotmail.con": "hotmail.com",
+};
+
+const getEmailRedirectUrl = () => {
+  return `${window.location.origin}/login?email_verified=true`;
+};
+
+const normalizeAndValidateEmail = (
+  rawEmail
+) => {
+  const normalizedEmail =
+    rawEmail
+      ?.trim()
+      .toLowerCase();
+
+  if (!normalizedEmail) {
+    throw new Error(
+      "Email address is required."
+    );
+  }
+
+  if (
+    normalizedEmail.length > 254 ||
+    !EMAIL_PATTERN.test(
+      normalizedEmail
+    )
+  ) {
+    throw new Error(
+      "Enter a valid email address."
+    );
+  }
+
+  const domain =
+    normalizedEmail
+      .split("@")
+      .pop();
+
+  const suggestedDomain =
+    COMMON_EMAIL_DOMAIN_TYPOS[
+      domain
+    ];
+
+  if (suggestedDomain) {
+    throw new Error(
+      `The email domain "${domain}" appears incorrect. Did you mean "${suggestedDomain}"?`
+    );
+  }
+
+  return normalizedEmail;
+};
+
 /*
 =====================================
 REGISTER
@@ -11,9 +76,9 @@ export async function registerUser(formData) {
     formData.full_name?.trim();
 
   const email =
-    formData.email
-      ?.trim()
-      .toLowerCase();
+    normalizeAndValidateEmail(
+      formData.email
+    );
 
   const role = formData.role;
 
@@ -46,12 +111,6 @@ export async function registerUser(formData) {
   if (!fullName) {
     throw new Error(
       "Full name is required."
-    );
-  }
-
-  if (!email) {
-    throw new Error(
-      "Email address is required."
     );
   }
 
@@ -305,6 +364,9 @@ export async function registerUser(formData) {
     password: formData.password,
 
     options: {
+      emailRedirectTo:
+        getEmailRedirectUrl(),
+
       data: {
         full_name: fullName,
         role,
@@ -343,6 +405,20 @@ export async function registerUser(formData) {
           role === "Student"
             ? block
             : null,
+
+        student_type:
+          role === "Student"
+            ? formData.student_type ||
+              "Regular"
+            : null,
+
+        irregular_subject_ids:
+          role === "Student" &&
+          formData.student_type ===
+            "Irregular"
+            ? formData.irregular_subject_ids ||
+              []
+            : [],
       },
     },
   });
@@ -359,78 +435,39 @@ export async function registerUser(formData) {
 
   /*
   =====================================
-  SAVE PUBLIC USER PROFILE
+  WAIT FOR EMAIL CONFIRMATION
   =====================================
+
+  Do not insert into public.users here.
+
+  The database trigger in
+  enforce_verified_email_registration.sql
+  creates the Pending public profile only
+  after auth.users.email_confirmed_at is set.
+  This prevents unverified or unreachable
+  email addresses from appearing as valid
+  pending registrations.
   */
 
-  const {
-    error: profileError,
-  } = await supabase
-    .from("users")
-    .insert({
-      auth_id: data.user.id,
+  if (data.session) {
+    /*
+    A session during sign-up means Supabase
+    Confirm Email is disabled. Sign out and
+    reject the registration immediately.
+    */
 
-      student_id:
-        role === "Student"
-          ? studentNumber
-          : null,
-
-      employee_id:
-        role === "Approver"
-          ? employeeId
-          : null,
-
-      full_name: fullName,
-      email,
-      role,
-
-      department: null,
-
-      course:
-        role === "Student"
-          ? selectedCourse.course_code
-          : null,
-
-      year_level:
-        role === "Student"
-          ? yearLevel
-          : null,
-
-      school_year:
-        role === "Student"
-          ? schoolYear
-          : null,
-
-      semester:
-        role === "Student"
-          ? semester
-          : null,
-
-      section:
-        role === "Student"
-          ? block
-          : null,
-
-      /*
-      The real section UUID will be
-      assigned by the administrator.
-      */
-
-      section_id: null,
-
-      office: null,
-      profile_picture: null,
-
-      status: "Pending",
-      email_verified: false,
-    });
-
-  if (profileError) {
     await supabase.auth.signOut();
-    throw profileError;
+
+    throw new Error(
+      "Registration is temporarily unavailable because email confirmation is disabled in Supabase. Enable Confirm Email before accepting registrations."
+    );
   }
 
-  return data.user;
+  return {
+    ...data.user,
+    requires_email_confirmation:
+      true,
+  };
 }
 
 /*
@@ -498,6 +535,17 @@ export async function loginUser(
     throw authError;
   }
 
+  if (
+    !authData.user
+      ?.email_confirmed_at
+  ) {
+    await supabase.auth.signOut();
+
+    throw new Error(
+      "Verify your email address before signing in. Open the confirmation link sent to your inbox."
+    );
+  }
+
   /*
   =====================================
   LOAD USER PROFILE
@@ -514,10 +562,26 @@ export async function loginUser(
       "auth_id",
       authData.user.id
     )
-    .single();
+    .maybeSingle();
 
   if (profileError) {
     throw profileError;
+  }
+
+  if (!profile) {
+    await supabase.auth.signOut();
+
+    throw new Error(
+      "Your verified registration profile is not ready. Run the verified-email registration SQL in Supabase, then try again."
+    );
+  }
+
+  if (!profile.email_verified) {
+    await supabase.auth.signOut();
+
+    throw new Error(
+      "Your email address has not been verified."
+    );
   }
 
   /*
@@ -594,6 +658,39 @@ export async function logoutUser() {
 
 /*
 =====================================
+RESEND EMAIL CONFIRMATION
+=====================================
+*/
+
+export async function resendEmailConfirmation(
+  rawEmail
+) {
+  const email =
+    normalizeAndValidateEmail(
+      rawEmail
+    );
+
+  const {
+    error,
+  } = await supabase.auth.resend({
+    type: "signup",
+    email,
+
+    options: {
+      emailRedirectTo:
+        getEmailRedirectUrl(),
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return true;
+}
+
+/*
+=====================================
 RESET PASSWORD
 =====================================
 */
@@ -602,7 +699,9 @@ export async function resetPassword(
   email
 ) {
   const normalizedEmail =
-    email.trim().toLowerCase();
+    normalizeAndValidateEmail(
+      email
+    );
 
   const {
     error,

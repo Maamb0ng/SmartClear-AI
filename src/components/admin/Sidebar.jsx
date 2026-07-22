@@ -22,7 +22,7 @@ import {
 } from "react-icons/fa";
 
 import { supabase } from "../../services/supabase";
-import schoolLogo from "../../assets/cctc-logo.jpg";
+import smartClearLogo from "../../assets/smartclear-logo.png";
 
 const MENU_GROUPS = [
   {
@@ -199,20 +199,20 @@ function Sidebar() {
         <div className="flex items-center gap-3.5">
           <motion.div
             whileHover={{
-              rotate: 4,
-              scale: 1.05,
+              rotate: 3,
+              scale: 1.06,
             }}
             transition={{
               type: "spring",
               stiffness: 260,
               damping: 18,
             }}
-            className="h-14 w-14 shrink-0 overflow-hidden rounded-full border border-white/25 bg-white p-1 shadow-[0_12px_28px_rgba(0,0,0,0.28)]"
+            className="flex h-16 w-16 shrink-0 items-center justify-center"
           >
             <img
-              src={schoolLogo}
-              alt="Consolatrix College of Toledo City seal"
-              className="h-full w-full rounded-full object-cover"
+              src={smartClearLogo}
+              alt="SmartClear AI logo"
+              className="h-full w-full object-contain drop-shadow-[0_12px_24px_rgba(34,211,238,0.30)]"
             />
           </motion.div>
 

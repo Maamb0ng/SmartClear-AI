@@ -73,6 +73,14 @@ const normalizeValue = (value) =>
     .trim()
     .toLowerCase();
 
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
 const getUserGroup = (user) => {
   const role = normalizeValue(user?.role);
 
@@ -552,25 +560,101 @@ function UserManagement() {
   async function handleDelete(
     user
   ) {
+    const safeName =
+      escapeHtml(
+        user.full_name ||
+          "Unnamed user"
+      );
+
+    const safeEmail =
+      escapeHtml(
+        user.email ||
+          "No email"
+      );
+
+    const safeRole =
+      escapeHtml(
+        user.role ||
+          "Unknown role"
+      );
+
+    const safeStatus =
+      escapeHtml(
+        user.status ||
+          "Unknown status"
+      );
+
     const result =
       await Swal.fire({
         title:
-          "Delete User Record?",
+          "Permanently Delete Account?",
         html: `
-          <div style="text-align:left; line-height:1.65;">
-            You are about to delete <strong>${user.full_name || "this user"}</strong>.
-            <br><br>
-            <span style="color:#dc2626;">This action cannot be undone.</span>
+          <div style="text-align:left; line-height:1.6;">
+            <div style="padding:14px; border:1px solid #fecaca; border-radius:12px; background:#fff1f2;">
+              <div style="font-weight:800; color:#991b1b;">Account selected for deletion</div>
+              <div style="margin-top:8px;"><strong>Name:</strong> ${safeName}</div>
+              <div><strong>Email:</strong> ${safeEmail}</div>
+              <div><strong>Role:</strong> ${safeRole}</div>
+              <div><strong>Status:</strong> ${safeStatus}</div>
+            </div>
+
+            <div style="margin-top:16px; color:#475569;">
+              This will permanently remove:
+              <ul style="margin:8px 0 0 20px;">
+                <li>The Supabase authentication account</li>
+                <li>The SmartClear AI user profile</li>
+                <li>The user's ability to sign in again</li>
+              </ul>
+            </div>
+
+            <div style="margin-top:16px; padding:12px; border-radius:10px; background:#fef2f2; color:#b91c1c; font-weight:700;">
+              This action cannot be undone. Type DELETE below to continue.
+            </div>
           </div>
         `,
         icon:
           "warning",
+        input:
+          "text",
+        inputPlaceholder:
+          "Type DELETE",
+        inputAttributes: {
+          autocapitalize:
+            "off",
+          autocomplete:
+            "off",
+          spellcheck:
+            "false",
+        },
+        inputValidator: (
+          value
+        ) => {
+          if (
+            String(
+              value ||
+                ""
+            )
+              .trim()
+              .toUpperCase() !==
+            "DELETE"
+          ) {
+            return "Type DELETE exactly to confirm permanent deletion.";
+          }
+
+          return undefined;
+        },
         showCancelButton:
+          true,
+        reverseButtons:
+          true,
+        focusCancel:
           true,
         confirmButtonColor:
           "#dc2626",
+        cancelButtonColor:
+          "#64748b",
         confirmButtonText:
-          "Delete User",
+          "Permanently Delete",
         cancelButtonText:
           "Cancel",
       });
@@ -587,15 +671,18 @@ function UserManagement() {
       );
 
       await deleteUser(
-        user.id
+        user
       );
 
       await Swal.fire({
         icon:
           "success",
         title:
-          "User Deleted",
-        timer: 1400,
+          "Account Permanently Deleted",
+        text:
+          `${user.full_name || "The user"} can no longer sign in to SmartClear AI.`,
+        timer:
+          1800,
         showConfirmButton:
           false,
       });
@@ -615,7 +702,7 @@ function UserManagement() {
           "Delete Failed",
         text:
           error?.message ||
-          "The user record could not be deleted.",
+          "The authentication account and user profile could not be deleted.",
         confirmButtonColor:
           "#2563eb",
       });

@@ -194,6 +194,25 @@ const getStudentBlock = (user) => {
   );
 };
 
+const getStudentType = (user) => {
+  const value = normalizeValue(
+    user?.student_type ||
+      user?.student_classification
+  );
+
+  return value === "irregular"
+    ? "Irregular"
+    : "Regular";
+};
+
+const getStudentTypeClasses = (
+  studentType
+) => {
+  return studentType === "Irregular"
+    ? "border-amber-200 bg-amber-50 text-amber-700"
+    : "border-emerald-200 bg-emerald-50 text-emerald-700";
+};
+
 function UserManagement() {
   const [
     users,
@@ -221,6 +240,11 @@ function UserManagement() {
   ] = useState("students");
 
   const [
+    studentTypeFilter,
+    setStudentTypeFilter,
+  ] = useState("All");
+
+  const [
     editingUser,
     setEditingUser,
   ] = useState(null);
@@ -245,6 +269,7 @@ function UserManagement() {
     course: "",
     year_level: "",
     block: "",
+    student_type: "Regular",
     office: "",
   });
 
@@ -300,6 +325,8 @@ function UserManagement() {
         administrators: 0,
         pending: 0,
         active: 0,
+        regular: 0,
+        irregular: 0,
       };
 
       users.forEach(
@@ -310,6 +337,22 @@ function UserManagement() {
             );
 
           counts[group] += 1;
+
+          if (
+            group === "students"
+          ) {
+            if (
+              getStudentType(
+                user
+              ) === "Irregular"
+            ) {
+              counts.irregular +=
+                1;
+            } else {
+              counts.regular +=
+                1;
+            }
+          }
 
           const status =
             normalizeValue(
@@ -369,6 +412,19 @@ function UserManagement() {
         )
         .filter(
           (user) => {
+            if (
+              activeTab ===
+                "students" &&
+              studentTypeFilter !==
+                "All" &&
+              getStudentType(
+                user
+              ) !==
+                studentTypeFilter
+            ) {
+              return false;
+            }
+
             if (!keyword) {
               return true;
             }
@@ -383,6 +439,7 @@ function UserManagement() {
               user.course,
               user.year_level,
               getStudentBlock(user),
+              getStudentType(user),
               user.office,
               user.status,
             ]
@@ -398,6 +455,7 @@ function UserManagement() {
       users,
       activeTab,
       search,
+      studentTypeFilter,
     ]);
 
   async function handleApprove(
@@ -408,6 +466,13 @@ function UserManagement() {
         user
       ) === "students";
 
+    const studentType =
+      isStudent
+        ? getStudentType(
+            user
+          )
+        : null;
+
     const result =
       await Swal.fire({
         title:
@@ -417,7 +482,7 @@ function UserManagement() {
             <strong>${user.full_name || "This user"}</strong> will be allowed to sign in to SmartClear AI.
             ${
               isStudent
-                ? "<br><br><span style='color:#b45309;'>Confirm that the student's official academic assignment has already been verified.</span>"
+                ? `<br><br><span style="color:#b45309;">Classification: <strong>${studentType}</strong>. Confirm that the student's official academic assignment${studentType === "Irregular" ? " and selected irregular subjects have" : " has"} already been verified.</span>`
                 : ""
             }
           </div>
@@ -738,6 +803,8 @@ function UserManagement() {
         "",
       block:
         getStudentBlock(user),
+      student_type:
+        getStudentType(user),
       office:
         user.office ||
         "",
@@ -1018,7 +1085,7 @@ function UserManagement() {
               value:
                 userCounts.students,
               note:
-                "Registered learners",
+                `${userCounts.regular} regular • ${userCounts.irregular} irregular`,
               icon:
                 FaUserGraduate,
               classes:
@@ -1273,25 +1340,57 @@ function UserManagement() {
             </div>
           </div>
 
-          <div className="relative w-full lg:max-w-md">
-            <FaSearch className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+          <div className="grid w-full gap-3 sm:grid-cols-[minmax(0,1fr)_auto] lg:max-w-2xl">
+            <div className="relative min-w-0">
+              <FaSearch className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
 
-            <input
-              type="search"
-              placeholder={`Search ${currentTab.label.toLowerCase()}...`}
-              value={
-                search
-              }
-              onChange={(
-                event
-              ) =>
-                setSearch(
-                  event.target
-                    .value
-                )
-              }
-              className="h-12 w-full rounded-xl border border-slate-300 bg-slate-50 pl-11 pr-4 text-sm outline-none transition focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-100"
-            />
+              <input
+                type="search"
+                placeholder={`Search ${currentTab.label.toLowerCase()}...`}
+                value={
+                  search
+                }
+                onChange={(
+                  event
+                ) =>
+                  setSearch(
+                    event.target
+                      .value
+                  )
+                }
+                className="h-12 w-full rounded-xl border border-slate-300 bg-slate-50 pl-11 pr-4 text-sm outline-none transition focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              />
+            </div>
+
+            {activeTab ===
+              "students" && (
+              <select
+                value={
+                  studentTypeFilter
+                }
+                onChange={(
+                  event
+                ) =>
+                  setStudentTypeFilter(
+                    event.target
+                      .value
+                  )
+                }
+                className="h-12 min-w-[170px] rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+              >
+                <option value="All">
+                  All Students
+                </option>
+
+                <option value="Regular">
+                  Regular Students
+                </option>
+
+                <option value="Irregular">
+                  Irregular Students
+                </option>
+              </select>
+            )}
           </div>
         </section>
 
@@ -1511,13 +1610,31 @@ function UserManagement() {
                                     </span>
                                   </div>
 
-                                  <span
-                                    className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black ${roleStyle.badge}`}
-                                  >
-                                    <RoleIcon />
-                                    {user.role ||
-                                      "Unassigned Role"}
-                                  </span>
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <span
+                                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black ${roleStyle.badge}`}
+                                    >
+                                      <RoleIcon />
+                                      {user.role ||
+                                        "Unassigned Role"}
+                                    </span>
+
+                                    {group ===
+                                      "students" && (
+                                      <span
+                                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] ${getStudentTypeClasses(
+                                          getStudentType(
+                                            user
+                                          )
+                                        )}`}
+                                      >
+                                        <FaLayerGroup />
+                                        {getStudentType(
+                                          user
+                                        )}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             </td>
@@ -1556,6 +1673,34 @@ function UserManagement() {
 
                                     {user.year_level ||
                                       "Year not assigned"}
+                                  </div>
+
+                                  <div className="mt-2 flex items-center gap-2 text-xs font-bold">
+                                    <FaLayerGroup
+                                      className={
+                                        getStudentType(
+                                          user
+                                        ) ===
+                                        "Irregular"
+                                          ? "text-amber-600"
+                                          : "text-emerald-600"
+                                      }
+                                    />
+
+                                    <span
+                                      className={
+                                        getStudentType(
+                                          user
+                                        ) ===
+                                        "Irregular"
+                                          ? "text-amber-700"
+                                          : "text-emerald-700"
+                                      }
+                                    >
+                                      {getStudentType(
+                                        user
+                                      )} Student
+                                    </span>
                                   </div>
 
                                   <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
@@ -1941,6 +2086,31 @@ function UserManagement() {
                             placeholder="e.g. A"
                             className="h-12 w-full rounded-xl border border-slate-300 px-4 text-sm uppercase outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
                           />
+                        </label>
+
+                        <label className="block">
+                          <span className="mb-2 block text-sm font-bold text-slate-700">
+                            Student Classification
+                          </span>
+
+                          <select
+                            name="student_type"
+                            value={
+                              editData.student_type
+                            }
+                            onChange={
+                              handleEditChange
+                            }
+                            className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+                          >
+                            <option value="Regular">
+                              Regular Student
+                            </option>
+
+                            <option value="Irregular">
+                              Irregular Student
+                            </option>
+                          </select>
                         </label>
                       </>
                     )}

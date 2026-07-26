@@ -68,6 +68,7 @@ function getSectionYearLevel(section) {
 
 function getSectionBlock(section) {
   return (
+    section?.block_code ||
     section?.block ||
     section?.block_name ||
     section?.section_name ||

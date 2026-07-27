@@ -137,6 +137,72 @@ export async function approveUser(user) {
     return data;
   }
 
+  const studentType =
+    normalizeText(
+      user.student_type ||
+        user.student_classification ||
+        "Regular"
+    );
+
+  if (studentType === "irregular") {
+    const {
+      data:
+        irregularAssignments,
+      error:
+        irregularAssignmentsError,
+    } = await supabase
+      .from(
+        "student_irregular_subjects"
+      )
+      .select(
+        "id, verification_status, class_offering_id"
+      )
+      .eq(
+        "student_id",
+        user.id
+      );
+
+    if (
+      irregularAssignmentsError
+    ) {
+      if (
+        irregularAssignmentsError.code ===
+        "42P01"
+      ) {
+        throw new Error(
+          "The irregular-subject workflow is not installed yet. Run setup_irregular_subject_workflow.sql in Supabase."
+        );
+      }
+
+      throw irregularAssignmentsError;
+    }
+
+    const assignments =
+      irregularAssignments || [];
+
+    if (
+      assignments.length === 0
+    ) {
+      throw new Error(
+        "This irregular student has no saved subject selections. Open Selected Subjects in User Management and verify the registration data first."
+      );
+    }
+
+    const unapprovedCount =
+      assignments.filter(
+        (assignment) =>
+          assignment.verification_status !==
+            "Approved" ||
+          !assignment.class_offering_id
+      ).length;
+
+    if (unapprovedCount > 0) {
+      throw new Error(
+        `${unapprovedCount} irregular subject selection(s) still require Administrator verification and an official class offering before this account can be activated.`
+      );
+    }
+  }
+
   const course = normalizeCourse(user.course);
   const yearLevel = normalizeYearLevel(user.year_level);
   const block = normalizeBlock(getUserBlock(user));

@@ -47,6 +47,8 @@ import {
   updateUser,
 } from "../../services/userService";
 
+import { supabase } from "../../services/supabase";
+
 const USER_TABS = [
   {
     key: "students",
@@ -213,6 +215,34 @@ const getStudentTypeClasses = (
     : "border-emerald-200 bg-emerald-50 text-emerald-700";
 };
 
+const getSubjectCode = (subject) =>
+  subject?.subject_code ||
+  subject?.code ||
+  "SUBJECT";
+
+const getSubjectName = (subject) =>
+  subject?.subject_name ||
+  subject?.name ||
+  subject?.title ||
+  "Unnamed Subject";
+
+const getVerificationClasses = (
+  status
+) => {
+  const normalized =
+    normalizeValue(status);
+
+  if (normalized === "approved") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (normalized === "rejected") {
+    return "border-rose-200 bg-rose-50 text-rose-700";
+  }
+
+  return "border-amber-200 bg-amber-50 text-amber-700";
+};
+
 function UserManagement() {
   const [
     users,
@@ -260,6 +290,51 @@ function UserManagement() {
   ] = useState(null);
 
   const [
+    irregularAssignments,
+    setIrregularAssignments,
+  ] = useState([]);
+
+  const [
+    subjectCatalog,
+    setSubjectCatalog,
+  ] = useState([]);
+
+  const [
+    classOfferings,
+    setClassOfferings,
+  ] = useState([]);
+
+  const [
+    officialSections,
+    setOfficialSections,
+  ] = useState([]);
+
+  const [
+    approverProfiles,
+    setApproverProfiles,
+  ] = useState([]);
+
+  const [
+    irregularSubjectSetupError,
+    setIrregularSubjectSetupError,
+  ] = useState("");
+
+  const [
+    selectedIrregularStudent,
+    setSelectedIrregularStudent,
+  ] = useState(null);
+
+  const [
+    selectedOfferingByAssignment,
+    setSelectedOfferingByAssignment,
+  ] = useState({});
+
+  const [
+    busyIrregularSubjectId,
+    setBusyIrregularSubjectId,
+  ] = useState(null);
+
+  const [
     editData,
     setEditData,
   ] = useState({
@@ -272,6 +347,455 @@ function UserManagement() {
     student_type: "Regular",
     office: "",
   });
+
+  async function loadIrregularSubjectData() {
+    const [
+      assignmentResponse,
+      subjectResponse,
+      offeringResponse,
+      sectionResponse,
+      approverResponse,
+    ] = await Promise.all([
+      supabase
+        .from(
+          "student_irregular_subjects"
+        )
+        .select("*")
+        .order(
+          "created_at",
+          {
+            ascending: true,
+          }
+        ),
+
+      supabase
+        .from("subjects")
+        .select("*")
+        .order(
+          "subject_code",
+          {
+            ascending: true,
+          }
+        ),
+
+      supabase
+        .from(
+          "class_offerings"
+        )
+        .select(
+          "id, section_id, subject_id, teacher_id, school_year, semester, is_active"
+        )
+        .eq(
+          "is_active",
+          true
+        ),
+
+      supabase
+        .from("sections")
+        .select(
+          "id, course_id, course, year_level, block_code, school_year, semester, is_active"
+        ),
+
+      supabase
+        .from("users")
+        .select(
+          "id, full_name, employee_id, email, role, status"
+        )
+        .eq(
+          "role",
+          "Approver"
+        )
+        .eq(
+          "status",
+          "Active"
+        ),
+    ]);
+
+    if (
+      assignmentResponse.error
+    ) {
+      if (
+        assignmentResponse.error.code ===
+        "42P01"
+      ) {
+        setIrregularSubjectSetupError(
+          "Run setup_irregular_subject_workflow.sql in Supabase to enable selected-subject verification."
+        );
+
+        setIrregularAssignments(
+          []
+        );
+
+        return;
+      }
+
+      throw assignmentResponse.error;
+    }
+
+    if (subjectResponse.error) {
+      throw subjectResponse.error;
+    }
+
+    if (offeringResponse.error) {
+      throw offeringResponse.error;
+    }
+
+    if (sectionResponse.error) {
+      throw sectionResponse.error;
+    }
+
+    if (approverResponse.error) {
+      throw approverResponse.error;
+    }
+
+    setIrregularSubjectSetupError(
+      ""
+    );
+
+    setIrregularAssignments(
+      assignmentResponse.data ||
+        []
+    );
+
+    setSubjectCatalog(
+      subjectResponse.data ||
+        []
+    );
+
+    setClassOfferings(
+      offeringResponse.data ||
+        []
+    );
+
+    setOfficialSections(
+      sectionResponse.data ||
+        []
+    );
+
+    setApproverProfiles(
+      approverResponse.data ||
+        []
+    );
+  }
+
+  const getStudentIrregularAssignments = (
+    studentId
+  ) =>
+    irregularAssignments.filter(
+      (assignment) =>
+        String(
+          assignment.student_id
+        ) ===
+        String(studentId)
+    );
+
+  const getSubjectById = (
+    subjectId
+  ) =>
+    subjectCatalog.find(
+      (subject) =>
+        String(subject.id) ===
+        String(subjectId)
+    );
+
+  const getSectionById = (
+    sectionId
+  ) =>
+    officialSections.find(
+      (section) =>
+        String(section.id) ===
+        String(sectionId)
+    );
+
+  const getApproverById = (
+    approverId
+  ) =>
+    approverProfiles.find(
+      (approver) =>
+        String(approver.id) ===
+        String(approverId)
+    );
+
+  const getOfferingById = (
+    offeringId
+  ) =>
+    classOfferings.find(
+      (offering) =>
+        String(offering.id) ===
+        String(offeringId)
+    );
+
+  const getMatchingOfferings = (
+    assignment
+  ) =>
+    classOfferings.filter(
+      (offering) =>
+        String(
+          offering.subject_id
+        ) ===
+          String(
+            assignment.subject_id
+          ) &&
+        normalizeValue(
+          offering.school_year
+        ) ===
+          normalizeValue(
+            assignment.school_year
+          ) &&
+        normalizeValue(
+          offering.semester
+        ) ===
+          normalizeValue(
+            assignment.semester
+          )
+    );
+
+  const getOfferingLabel = (
+    offering
+  ) => {
+    const section =
+      getSectionById(
+        offering.section_id
+      );
+
+    const approver =
+      getApproverById(
+        offering.teacher_id
+      );
+
+    const course =
+      section?.course ||
+      "Course";
+
+    const yearLevel =
+      section?.year_level ||
+      "Year";
+
+    const block =
+      section?.block_code
+        ? `Block ${section.block_code}`
+        : "Block";
+
+    const teacher =
+      approver?.full_name ||
+      "Unassigned teacher";
+
+    return `${course} • ${yearLevel} • ${block} • ${teacher}`;
+  };
+
+  function openIrregularSubjects(
+    user
+  ) {
+    const assignments =
+      getStudentIrregularAssignments(
+        user.id
+      );
+
+    const initialSelection = {};
+
+    assignments.forEach(
+      (assignment) => {
+        if (
+          assignment.class_offering_id
+        ) {
+          initialSelection[
+            assignment.id
+          ] =
+            assignment.class_offering_id;
+
+          return;
+        }
+
+        const matching =
+          getMatchingOfferings(
+            assignment
+          );
+
+        if (
+          matching.length ===
+          1
+        ) {
+          initialSelection[
+            assignment.id
+          ] =
+            matching[0].id;
+        }
+      }
+    );
+
+    setSelectedOfferingByAssignment(
+      initialSelection
+    );
+
+    setSelectedIrregularStudent(
+      user
+    );
+  }
+
+  function closeIrregularSubjects() {
+    if (
+      busyIrregularSubjectId
+    ) {
+      return;
+    }
+
+    setSelectedIrregularStudent(
+      null
+    );
+
+    setSelectedOfferingByAssignment(
+      {}
+    );
+  }
+
+  async function verifyIrregularSubject(
+    assignment,
+    status
+  ) {
+    const selectedOfferingId =
+      selectedOfferingByAssignment[
+        assignment.id
+      ] ||
+      assignment.class_offering_id ||
+      null;
+
+    let remarks = null;
+
+    if (
+      status === "Approved" &&
+      !selectedOfferingId
+    ) {
+      await Swal.fire({
+        icon: "warning",
+        title:
+          "Choose an Official Class",
+        text:
+          "Select the official class offering and assigned teacher before approving this irregular subject.",
+        confirmButtonColor:
+          "#2563eb",
+      });
+
+      return;
+    }
+
+    if (
+      status === "Rejected"
+    ) {
+      const result =
+        await Swal.fire({
+          icon:
+            "warning",
+          title:
+            "Reject Subject Selection?",
+          input:
+            "textarea",
+          inputLabel:
+            "Reason / Remarks",
+          inputPlaceholder:
+            "Explain why this subject selection needs correction...",
+          inputValidator: (
+            value
+          ) =>
+            value?.trim()
+              ? undefined
+              : "Remarks are required when rejecting a selected subject.",
+          showCancelButton:
+            true,
+          confirmButtonText:
+            "Reject Subject",
+          cancelButtonText:
+            "Cancel",
+          confirmButtonColor:
+            "#dc2626",
+        });
+
+      if (
+        !result.isConfirmed
+      ) {
+        return;
+      }
+
+      remarks =
+        result.value?.trim() ||
+        null;
+    }
+
+    try {
+      setBusyIrregularSubjectId(
+        assignment.id
+      );
+
+      const {
+        error,
+      } = await supabase.rpc(
+        "verify_irregular_subject_assignment",
+        {
+          p_assignment_id:
+            assignment.id,
+          p_status:
+            status,
+          p_class_offering_id:
+            status ===
+            "Approved"
+              ? String(
+                  selectedOfferingId
+                )
+              : null,
+          p_remarks:
+            remarks,
+        }
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      await loadIrregularSubjectData();
+
+      await Swal.fire({
+        icon:
+          status ===
+          "Approved"
+            ? "success"
+            : "info",
+        title:
+          status ===
+          "Approved"
+            ? "Subject Verified"
+            : "Subject Returned",
+        text:
+          status ===
+          "Approved"
+            ? "The subject and its official teacher are now confirmed for this irregular student."
+            : "The selected subject was rejected and marked for correction.",
+        timer:
+          1600,
+        showConfirmButton:
+          false,
+      });
+    } catch (error) {
+      console.error(
+        "Verify irregular subject error:",
+        error
+      );
+
+      await Swal.fire({
+        icon:
+          "error",
+        title:
+          "Verification Failed",
+        text:
+          error?.message ||
+          "Unable to update this irregular subject selection.",
+        confirmButtonColor:
+          "#2563eb",
+      });
+    } finally {
+      setBusyIrregularSubjectId(
+        null
+      );
+    }
+  }
 
   async function loadUsers(
     silent = false
@@ -291,6 +815,8 @@ function UserManagement() {
           ? data
           : []
       );
+
+      await loadIrregularSubjectData();
     } catch (error) {
       console.error(
         "Load users error:",
@@ -472,6 +998,63 @@ function UserManagement() {
             user
           )
         : null;
+
+    if (
+      isStudent &&
+      studentType ===
+        "Irregular"
+    ) {
+      const assignments =
+        getStudentIrregularAssignments(
+          user.id
+        );
+
+      const verifiedCount =
+        assignments.filter(
+          (assignment) =>
+            assignment.verification_status ===
+              "Approved" &&
+            assignment.class_offering_id
+        ).length;
+
+      if (
+        assignments.length ===
+          0 ||
+        verifiedCount !==
+          assignments.length
+      ) {
+        const warning =
+          await Swal.fire({
+            icon:
+              "warning",
+            title:
+              "Verify Selected Subjects First",
+            text:
+              assignments.length ===
+              0
+                ? "No irregular subject selections are stored for this student."
+                : `${assignments.length - verifiedCount} selected subject(s) still require verification and an official class assignment.`,
+            confirmButtonText:
+              "View Selected Subjects",
+            showCancelButton:
+              true,
+            cancelButtonText:
+              "Close",
+            confirmButtonColor:
+              "#2563eb",
+          });
+
+        if (
+          warning.isConfirmed
+        ) {
+          openIrregularSubjects(
+            user
+          );
+        }
+
+        return;
+      }
+    }
 
     const result =
       await Swal.fire({
@@ -1394,6 +1977,12 @@ function UserManagement() {
           </div>
         </section>
 
+        {irregularSubjectSetupError && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+            {irregularSubjectSetupError}
+          </div>
+        )}
+
         {/* User table */}
 
         <section className="overflow-hidden rounded-[1.75rem] border border-slate-200/80 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
@@ -1703,6 +2292,42 @@ function UserManagement() {
                                     </span>
                                   </div>
 
+                                  {getStudentType(
+                                    user
+                                  ) ===
+                                    "Irregular" && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        openIrregularSubjects(
+                                          user
+                                        )
+                                      }
+                                      className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-700 transition hover:bg-amber-100"
+                                    >
+                                      <FaBookOpen />
+
+                                      {(() => {
+                                        const assignments =
+                                          getStudentIrregularAssignments(
+                                            user.id
+                                          );
+
+                                        const approved =
+                                          assignments.filter(
+                                            (
+                                              assignment
+                                            ) =>
+                                              assignment.verification_status ===
+                                                "Approved" &&
+                                              assignment.class_offering_id
+                                          ).length;
+
+                                        return `${assignments.length} selected • ${approved} verified`;
+                                      })()}
+                                    </button>
+                                  )}
+
                                   <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
                                     <FaLayerGroup />
 
@@ -1811,6 +2436,47 @@ function UserManagement() {
                                   </motion.button>
                                 )}
 
+                                {group ===
+                                  "students" &&
+                                  getStudentType(
+                                    user
+                                  ) ===
+                                    "Irregular" && (
+                                  <motion.button
+                                    whileHover={{
+                                      y:
+                                        -2,
+                                    }}
+                                    whileTap={{
+                                      scale:
+                                        0.95,
+                                    }}
+                                    type="button"
+                                    title="View selected irregular subjects"
+                                    onClick={() =>
+                                      openIrregularSubjects(
+                                        user
+                                      )
+                                    }
+                                    className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700 transition hover:bg-violet-600 hover:text-white"
+                                  >
+                                    <FaBookOpen />
+
+                                    {getStudentIrregularAssignments(
+                                      user.id
+                                    ).some(
+                                      (
+                                        assignment
+                                      ) =>
+                                        assignment.verification_status !==
+                                          "Approved" ||
+                                        !assignment.class_offering_id
+                                    ) && (
+                                      <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-white bg-amber-500" />
+                                    )}
+                                  </motion.button>
+                                )}
+
                                 <motion.button
                                   whileHover={{
                                     y:
@@ -1864,6 +2530,312 @@ function UserManagement() {
             </table>
           </div>
         </section>
+
+        {/* Irregular subject verification modal */}
+
+        <AnimatePresence>
+          {selectedIrregularStudent && (
+            <motion.div
+              initial={{
+                opacity: 0,
+              }}
+              animate={{
+                opacity: 1,
+              }}
+              exit={{
+                opacity: 0,
+              }}
+              className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm sm:p-5"
+              onClick={
+                closeIrregularSubjects
+              }
+            >
+              <motion.div
+                initial={{
+                  opacity: 0,
+                  y: 24,
+                  scale:
+                    0.97,
+                }}
+                animate={{
+                  opacity: 1,
+                  y: 0,
+                  scale: 1,
+                }}
+                exit={{
+                  opacity: 0,
+                  y: 18,
+                  scale:
+                    0.97,
+                }}
+                className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
+                onClick={(
+                  event
+                ) =>
+                  event.stopPropagation()
+                }
+              >
+                <div className="shrink-0 bg-gradient-to-r from-[#061b51] to-blue-800 px-5 py-5 text-white sm:px-7">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-200">
+                        Irregular Student
+                      </p>
+
+                      <h2 className="mt-1 truncate text-2xl font-black">
+                        Selected Subjects
+                      </h2>
+
+                      <p className="mt-1 truncate text-sm text-blue-100/80">
+                        {selectedIrregularStudent.full_name}
+                        {" • "}
+                        {selectedIrregularStudent.student_id ||
+                          "No Student ID"}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={
+                        closeIrregularSubjects
+                      }
+                      disabled={
+                        Boolean(
+                          busyIrregularSubjectId
+                        )
+                      }
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white transition hover:bg-white/20 disabled:opacity-50"
+                    >
+                      <FaTimes />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+                  {getStudentIrregularAssignments(
+                    selectedIrregularStudent.id
+                  ).length ===
+                  0 ? (
+                    <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-8 text-center">
+                      <FaBookOpen className="mx-auto text-4xl text-amber-400" />
+
+                      <h3 className="mt-4 text-lg font-black text-amber-800">
+                        No Selected Subjects Found
+                      </h3>
+
+                      <p className="mt-2 text-sm leading-6 text-amber-700">
+                        Run the setup SQL, then refresh the account list so the registration metadata can be synchronized.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {getStudentIrregularAssignments(
+                        selectedIrregularStudent.id
+                      ).map(
+                        (
+                          assignment
+                        ) => {
+                          const subject =
+                            getSubjectById(
+                              assignment.subject_id
+                            );
+
+                          const matchingOfferings =
+                            getMatchingOfferings(
+                              assignment
+                            );
+
+                          const selectedOfferingId =
+                            selectedOfferingByAssignment[
+                              assignment.id
+                            ] ||
+                            assignment.class_offering_id ||
+                            "";
+
+                          const approvedOffering =
+                            getOfferingById(
+                              assignment.class_offering_id
+                            );
+
+                          const isBusy =
+                            busyIrregularSubjectId ===
+                            assignment.id;
+
+                          return (
+                            <div
+                              key={
+                                assignment.id
+                              }
+                              className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                            >
+                              <div className="flex flex-col gap-4 border-b border-slate-100 p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="rounded-lg bg-blue-100 px-2.5 py-1 text-xs font-black text-blue-700">
+                                      {getSubjectCode(
+                                        subject
+                                      )}
+                                    </span>
+
+                                    <span
+                                      className={`rounded-full border px-3 py-1 text-xs font-black ${getVerificationClasses(
+                                        assignment.verification_status
+                                      )}`}
+                                    >
+                                      {assignment.verification_status}
+                                    </span>
+                                  </div>
+
+                                  <h3 className="mt-3 text-lg font-black text-slate-900">
+                                    {getSubjectName(
+                                      subject
+                                    )}
+                                  </h3>
+
+                                  <p className="mt-1 text-sm text-slate-500">
+                                    {assignment.semester ||
+                                      selectedIrregularStudent.semester ||
+                                      "Semester not set"}
+                                    {" • "}
+                                    {assignment.school_year ||
+                                      selectedIrregularStudent.school_year ||
+                                      "School year not set"}
+                                  </p>
+                                </div>
+
+                                {assignment.remarks && (
+                                  <div className="max-w-md rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                                    <strong>
+                                      Remarks:
+                                    </strong>{" "}
+                                    {assignment.remarks}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                                <label className="block min-w-0">
+                                  <span className="mb-2 block text-sm font-black text-slate-700">
+                                    Official Class Offering and Teacher
+                                  </span>
+
+                                  <select
+                                    value={
+                                      selectedOfferingId
+                                    }
+                                    onChange={(
+                                      event
+                                    ) =>
+                                      setSelectedOfferingByAssignment(
+                                        (
+                                          current
+                                        ) => ({
+                                          ...current,
+                                          [assignment.id]:
+                                            event.target.value,
+                                        })
+                                      )
+                                    }
+                                    disabled={
+                                      isBusy
+                                    }
+                                    className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100 disabled:opacity-60"
+                                  >
+                                    <option value="">
+                                      Select official class and teacher
+                                    </option>
+
+                                    {matchingOfferings.map(
+                                      (
+                                        offering
+                                      ) => (
+                                        <option
+                                          key={
+                                            offering.id
+                                          }
+                                          value={
+                                            offering.id
+                                          }
+                                        >
+                                          {getOfferingLabel(
+                                            offering
+                                          )}
+                                        </option>
+                                      )
+                                    )}
+                                  </select>
+
+                                  {matchingOfferings.length ===
+                                    0 && (
+                                    <p className="mt-2 text-xs font-semibold text-rose-600">
+                                      No active class offering matches this subject, semester, and school year. Create one in Class Assignments first.
+                                    </p>
+                                  )}
+
+                                  {assignment.verification_status ===
+                                    "Approved" &&
+                                    approvedOffering && (
+                                    <p className="mt-2 text-xs font-bold text-emerald-700">
+                                      Verified assignment:{" "}
+                                      {getOfferingLabel(
+                                        approvedOffering
+                                      )}
+                                    </p>
+                                  )}
+                                </label>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      verifyIrregularSubject(
+                                        assignment,
+                                        "Rejected"
+                                      )
+                                    }
+                                    disabled={
+                                      isBusy
+                                    }
+                                    className="h-12 rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-black text-rose-700 transition hover:bg-rose-600 hover:text-white disabled:opacity-50"
+                                  >
+                                    Reject
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      verifyIrregularSubject(
+                                        assignment,
+                                        "Approved"
+                                      )
+                                    }
+                                    disabled={
+                                      isBusy ||
+                                      !selectedOfferingId
+                                    }
+                                    className="h-12 rounded-xl bg-emerald-600 px-4 text-sm font-black text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {isBusy
+                                      ? "Saving..."
+                                      : "Approve"}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-600 sm:px-7">
+                  An irregular account can only be activated after every selected subject is approved and connected to an official class offering.
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Edit account modal */}
 

@@ -1,0 +1,44 @@
+{
+  "name": "smartclear-ai",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@google/genai": "^2.10.0",
+    "@radix-ui/react-tooltip": "^1.2.12",
+    "@supabase/supabase-js": "^2.110.2",
+    "@tailwindcss/vite": "^4.3.2",
+    "bcryptjs": "^3.0.3",
+    "dayjs": "^1.11.21",
+    "framer-motion": "^12.42.2",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
+    "lucide-react": "^1.24.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-hot-toast": "^2.6.0",
+    "react-icons": "^5.7.0",
+    "react-intersection-observer": "^10.1.0",
+    "react-qr-code": "^2.2.0",
+    "react-router-dom": "^7.18.1",
+    "recharts": "^3.9.2",
+    "sweetalert2": "^11.26.25",
+    "tailwindcss": "^4.3.2",
+    "uuid": "^14.0.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "oxlint": "^1.71.0",
+    "supabase": "^2.109.1",
+    "vite": "^8.1.1"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2"
+  },
+  "compilerOptions": {
+    "strict": true
+  },
+  "lint": {
+    "rules": {
+      "exclude": [
+        "no-explicit-any"
+      ]
+    }
+  },
+  "fmt": {
+    "lineWidth": 80,
+    "indentWidth": 2,
+    "singleQuote": false
+  }
+}

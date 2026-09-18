@@ -7,16 +7,25 @@ import {
 
 import ProtectedRoute from "../components/common/ProtectedRoute";
 
-// Landing
+// ============================================================
+// LANDING
+// ============================================================
+
 import Landing from "../Landing";
 
-// Authentication
+// ============================================================
+// AUTHENTICATION
+// ============================================================
+
 import Login from "../pages/auth/Login";
 import Register from "../pages/auth/Register";
 import ForgotPassword from "../pages/auth/ForgotPassword";
 import ResetPassword from "../pages/auth/ResetPassword";
 
-// Student
+// ============================================================
+// STUDENT
+// ============================================================
+
 import StudentDashboard from "../pages/student/StudentDashboard";
 import RequestClearance from "../pages/student/RequestClearance";
 import ClearanceStatus from "../pages/student/ClearanceStatus";
@@ -24,17 +33,31 @@ import Assistant from "../pages/student/Assistant";
 import StudentNotifications from "../pages/student/Notifications";
 import StudentProfile from "../pages/student/Profile";
 
-// Approver
+// ============================================================
+// APPROVER
+// ============================================================
+
 import ApproverDashboard from "../pages/approver/ApproverDashboard";
 import PendingRequests from "../pages/approver/PendingRequests";
 import ApprovedRequests from "../pages/approver/ApprovedRequests";
 import RejectedRequests from "../pages/approver/RejectedRequests";
-import ReadyForEnrollment from "../pages/approver/ReadyForEnrollment";
 import StudentDetails from "../pages/approver/StudentDetails";
 import ApproverNotifications from "../pages/approver/Notifications";
 import ApproverProfile from "../pages/approver/Profile";
 
-// Administrator
+// ============================================================
+// TREASURER
+// ============================================================
+
+import TreasurerDashboard from "../pages/treasurer/TreasurerDashboard";
+import TreasurerReadyForEnrollment from "../pages/treasurer/ReadyForEnrollment";
+import TreasurerNotifications from "../pages/treasurer/Notifications";
+import TreasurerProfile from "../pages/treasurer/Profile";
+
+// ============================================================
+// ADMINISTRATOR
+// ============================================================
+
 import AdminDashboard from "../pages/admin/AdminDashboard";
 import UserManagement from "../pages/admin/UserManagement";
 import OfficeManagement from "../pages/admin/OfficeManagement";
@@ -55,7 +78,9 @@ function AppRoutes() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Public pages */}
+        {/* ======================================================
+            PUBLIC ROUTES
+        ====================================================== */}
 
         <Route
           path="/"
@@ -82,14 +107,14 @@ function AppRoutes() {
           element={<ResetPassword />}
         />
 
-        {/* Student-only pages */}
+        {/* ======================================================
+            STUDENT ROUTES
+        ====================================================== */}
 
         <Route
           element={
             <ProtectedRoute
-              allowedRoles={[
-                "Student",
-              ]}
+              allowedRoles={["Student"]}
             />
           }
         >
@@ -124,14 +149,15 @@ function AppRoutes() {
           />
         </Route>
 
-        {/* Approver-only pages */}
+        {/* ======================================================
+            REGULAR APPROVER ROUTES
+        ====================================================== */}
 
         <Route
           element={
             <ProtectedRoute
-              allowedRoles={[
-                "Approver",
-              ]}
+              allowedRoles={["Approver"]}
+              portal="approver"
             />
           }
         >
@@ -156,11 +182,6 @@ function AppRoutes() {
           />
 
           <Route
-            path="/approver/ready-for-enrollment"
-            element={<ReadyForEnrollment />}
-          />
-
-          <Route
             path="/approver/notifications"
             element={<ApproverNotifications />}
           />
@@ -176,7 +197,44 @@ function AppRoutes() {
           />
         </Route>
 
-        {/* Administrator-only pages */}
+        {/* ======================================================
+            TREASURER ROUTES
+        ====================================================== */}
+
+        <Route
+          element={
+            <ProtectedRoute
+              allowedRoles={["Approver"]}
+              portal="treasurer"
+            />
+          }
+        >
+          <Route
+            path="/treasurer/dashboard"
+            element={<TreasurerDashboard />}
+          />
+
+          <Route
+            path="/treasurer/ready-for-enrollment"
+            element={
+              <TreasurerReadyForEnrollment />
+            }
+          />
+
+          <Route
+            path="/treasurer/notifications"
+            element={<TreasurerNotifications />}
+          />
+
+          <Route
+            path="/treasurer/profile"
+            element={<TreasurerProfile />}
+          />
+        </Route>
+
+        {/* ======================================================
+            ADMINISTRATOR ROUTES
+        ====================================================== */}
 
         <Route
           element={
@@ -205,7 +263,9 @@ function AppRoutes() {
 
           <Route
             path="/admin/class-assignments"
-            element={<ClassAssignmentManagement />}
+            element={
+              <ClassAssignmentManagement />
+            }
           />
 
           <Route
@@ -264,7 +324,9 @@ function AppRoutes() {
           />
         </Route>
 
-        {/* Unknown URL */}
+        {/* ======================================================
+            UNKNOWN ROUTE
+        ====================================================== */}
 
         <Route
           path="*"

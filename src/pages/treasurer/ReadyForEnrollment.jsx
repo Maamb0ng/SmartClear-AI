@@ -7,7 +7,7 @@ import {
 import Swal from "sweetalert2";
 import { motion } from "framer-motion";
 
-import ApproverLayout from "../../layouts/ApproverLayout";
+import TreasurerLayout from "../../layouts/TreasurerLayout";
 import { supabase } from "../../services/supabase";
 
 import {
@@ -1005,7 +1005,7 @@ function ReadyForEnrollment() {
 
   if (loading) {
     return (
-      <ApproverLayout>
+      <TreasurerLayout>
         <div className="flex min-h-[65vh] items-center justify-center">
           <div className="text-center">
             <div className="mx-auto h-14 w-14 animate-spin rounded-full border-4 border-emerald-700 border-t-transparent" />
@@ -1015,13 +1015,13 @@ function ReadyForEnrollment() {
             </p>
           </div>
         </div>
-      </ApproverLayout>
+      </TreasurerLayout>
     );
   }
 
   if (!authorized) {
     return (
-      <ApproverLayout>
+      <TreasurerLayout>
         <div className="flex min-h-[65vh] items-center justify-center">
           <div className="max-w-xl rounded-3xl border border-amber-200 bg-white p-10 text-center shadow-lg">
             <FaShieldAlt className="mx-auto text-6xl text-amber-400" />
@@ -1035,12 +1035,12 @@ function ReadyForEnrollment() {
             </p>
           </div>
         </div>
-      </ApproverLayout>
+      </TreasurerLayout>
     );
   }
 
   return (
-    <ApproverLayout>
+    <TreasurerLayout>
       <motion.main
         initial={{
           opacity: 0,
@@ -1631,7 +1631,7 @@ function ReadyForEnrollment() {
           </div>
         )}
       </motion.main>
-    </ApproverLayout>
+    </TreasurerLayout>
   );
 }
 

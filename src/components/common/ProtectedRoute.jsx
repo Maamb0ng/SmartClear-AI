@@ -19,7 +19,37 @@ const normalizeValue = (value) =>
     .trim()
     .toLowerCase();
 
-const getRoleDashboard = (role) => {
+const FINANCIAL_KEYWORDS = [
+  "treasurer",
+  "cashier",
+  "accounting",
+  "finance",
+  "financial",
+];
+
+const isFinancialOffice = (office) => {
+  const officeCode = normalizeValue(
+    office?.office_code
+  );
+
+  const officeName = normalizeValue(
+    office?.office_name
+  );
+
+  if (officeCode === "fin") {
+    return true;
+  }
+
+  return FINANCIAL_KEYWORDS.some(
+    (keyword) =>
+      officeName.includes(keyword)
+  );
+};
+
+const getRoleDashboard = (
+  role,
+  isTreasurer = false
+) => {
   const normalizedRole =
     normalizeValue(role);
 
@@ -28,7 +58,9 @@ const getRoleDashboard = (role) => {
   }
 
   if (normalizedRole === "approver") {
-    return "/approver/dashboard";
+    return isTreasurer
+      ? "/treasurer/dashboard"
+      : "/approver/dashboard";
   }
 
   if (
@@ -43,39 +75,32 @@ const getRoleDashboard = (role) => {
 
 function ProtectedRoute({
   allowedRoles = [],
+  portal = null,
 }) {
   const location = useLocation();
 
-  const mountedRef =
-    useRef(false);
+  const mountedRef = useRef(false);
 
   const loadedAuthUserIdRef =
     useRef(null);
 
-  const [
-    initialLoading,
-    setInitialLoading,
-  ] = useState(true);
+  const [initialLoading, setInitialLoading] =
+    useState(true);
 
-  const [
-    profileLoading,
-    setProfileLoading,
-  ] = useState(false);
+  const [profileLoading, setProfileLoading] =
+    useState(false);
 
-  const [
-    session,
-    setSession,
-  ] = useState(null);
+  const [session, setSession] =
+    useState(null);
 
-  const [
-    profile,
-    setProfile,
-  ] = useState(null);
+  const [profile, setProfile] =
+    useState(null);
 
-  const [
-    accessError,
-    setAccessError,
-  ] = useState("");
+  const [isTreasurer, setIsTreasurer] =
+    useState(false);
+
+  const [accessError, setAccessError] =
+    useState("");
 
   const normalizedAllowedRoles =
     useMemo(
@@ -88,14 +113,63 @@ function ProtectedRoute({
 
   /*
   |--------------------------------------------------------------------------
-  | LOAD USER PROFILE
+  | CHECK TREASURER ASSIGNMENT
   |--------------------------------------------------------------------------
-  |
-  | showLoader is true only during the first access check or when a genuinely
-  | different user signs in.
-  |
-  | TOKEN_REFRESHED must never show a full-page loader because Supabase may
-  | refresh the access token when the browser tab becomes active again.
+  */
+
+  const checkTreasurerAssignment =
+    useCallback(async (profileId) => {
+      if (!profileId) {
+        return false;
+      }
+
+      try {
+        const {
+          data,
+          error,
+        } = await supabase
+          .from("approver_assignments")
+          .select(`
+            id,
+            office_id,
+            approver_id,
+            is_active,
+            offices (
+              id,
+              office_name,
+              office_code,
+              is_active
+            )
+          `)
+          .eq("approver_id", profileId)
+          .eq("is_active", true)
+          .not("office_id", "is", null);
+
+        if (error) {
+          throw error;
+        }
+
+        return (data || []).some(
+          (assignment) =>
+            assignment.offices
+              ?.is_active !== false &&
+            isFinancialOffice(
+              assignment.offices
+            )
+        );
+      } catch (error) {
+        console.error(
+          "Treasurer assignment check error:",
+          error
+        );
+
+        throw error;
+      }
+    }, []);
+
+  /*
+  |--------------------------------------------------------------------------
+  | LOAD USER PROFILE
   |--------------------------------------------------------------------------
   */
 
@@ -116,14 +190,10 @@ function ProtectedRoute({
             showLoader &&
             mountedRef.current
           ) {
-            setProfileLoading(
-              true
-            );
+            setProfileLoading(true);
           }
 
-          if (
-            mountedRef.current
-          ) {
+          if (mountedRef.current) {
             setAccessError("");
           }
 
@@ -155,26 +225,42 @@ function ProtectedRoute({
             );
           }
 
+          let treasurerAccount = false;
+
           if (
-            mountedRef.current
+            normalizeValue(data.role) ===
+            "approver"
           ) {
+            treasurerAccount =
+              await checkTreasurerAssignment(
+                data.id
+              );
+          }
+
+          if (mountedRef.current) {
             loadedAuthUserIdRef.current =
               authUserId;
 
             setProfile(data);
+            setIsTreasurer(
+              treasurerAccount
+            );
           }
 
-          return data;
+          return {
+            profile: data,
+            isTreasurer:
+              treasurerAccount,
+          };
         } catch (error) {
           console.error(
             "Protected route profile error:",
             error
           );
 
-          if (
-            mountedRef.current
-          ) {
+          if (mountedRef.current) {
             setProfile(null);
+            setIsTreasurer(false);
 
             setAccessError(
               error?.message ||
@@ -188,13 +274,11 @@ function ProtectedRoute({
             showLoader &&
             mountedRef.current
           ) {
-            setProfileLoading(
-              false
-            );
+            setProfileLoading(false);
           }
         }
       },
-      []
+      [checkTreasurerAssignment]
     );
 
   /*
@@ -204,15 +288,12 @@ function ProtectedRoute({
   */
 
   useEffect(() => {
-    mountedRef.current =
-      true;
+    mountedRef.current = true;
 
     const initializeAccess =
       async () => {
         try {
-          setInitialLoading(
-            true
-          );
+          setInitialLoading(true);
 
           const {
             data,
@@ -227,15 +308,11 @@ function ProtectedRoute({
           const currentSession =
             data?.session || null;
 
-          if (
-            !mountedRef.current
-          ) {
+          if (!mountedRef.current) {
             return;
           }
 
-          setSession(
-            currentSession
-          );
+          setSession(currentSession);
 
           if (
             currentSession?.user?.id
@@ -251,6 +328,7 @@ function ProtectedRoute({
               null;
 
             setProfile(null);
+            setIsTreasurer(false);
           }
         } catch (error) {
           console.error(
@@ -258,11 +336,10 @@ function ProtectedRoute({
             error
           );
 
-          if (
-            mountedRef.current
-          ) {
+          if (mountedRef.current) {
             setSession(null);
             setProfile(null);
+            setIsTreasurer(false);
 
             setAccessError(
               error?.message ||
@@ -270,12 +347,8 @@ function ProtectedRoute({
             );
           }
         } finally {
-          if (
-            mountedRef.current
-          ) {
-            setInitialLoading(
-              false
-            );
+          if (mountedRef.current) {
+            setInitialLoading(false);
           }
         }
       };
@@ -286,51 +359,34 @@ function ProtectedRoute({
     |--------------------------------------------------------------------------
     | AUTH STATE CHANGES
     |--------------------------------------------------------------------------
-    |
-    | Important:
-    | - SIGNED_OUT clears access.
-    | - TOKEN_REFRESHED only updates the session silently.
-    | - It does not reload the profile and does not show the loading screen.
-    |--------------------------------------------------------------------------
     */
 
     const {
-      data: {
-        subscription,
-      },
+      data: { subscription },
     } =
       supabase.auth.onAuthStateChange(
-        (
-          event,
-          nextSession
-        ) => {
-          if (
-            !mountedRef.current
-          ) {
+        (event, nextSession) => {
+          if (!mountedRef.current) {
             return;
           }
 
-          if (
-            event === "SIGNED_OUT"
-          ) {
+          if (event === "SIGNED_OUT") {
             loadedAuthUserIdRef.current =
               null;
 
             setSession(null);
             setProfile(null);
+            setIsTreasurer(false);
             setAccessError("");
             setInitialLoading(false);
             setProfileLoading(false);
+
             return;
           }
 
           if (
             event === "TOKEN_REFRESHED"
           ) {
-            /*
-            Never trigger a route reload or full-page loader here.
-            */
-
             setSession(
               nextSession || null
             );
@@ -355,13 +411,10 @@ function ProtectedRoute({
                 null;
 
               setProfile(null);
+              setIsTreasurer(false);
+
               return;
             }
-
-            /*
-            Only query the profile if this is a different authenticated user
-            or the profile has not been loaded yet.
-            */
 
             if (
               loadedAuthUserIdRef.current !==
@@ -379,16 +432,14 @@ function ProtectedRoute({
       );
 
     return () => {
-      mountedRef.current =
-        false;
-
+      mountedRef.current = false;
       subscription.unsubscribe();
     };
   }, [loadProfile]);
 
   /*
   |--------------------------------------------------------------------------
-  | INITIAL LOADING SCREEN
+  | LOADING
   |--------------------------------------------------------------------------
   */
 
@@ -406,7 +457,8 @@ function ProtectedRoute({
           </h1>
 
           <p className="mt-2 text-sm text-slate-500">
-            SmartClear AI is verifying your account and role.
+            SmartClear AI is verifying
+            your account and portal access.
           </p>
         </div>
       </main>
@@ -419,9 +471,7 @@ function ProtectedRoute({
   |--------------------------------------------------------------------------
   */
 
-  if (
-    !session?.user
-  ) {
+  if (!session?.user) {
     return (
       <Navigate
         to="/login"
@@ -437,7 +487,7 @@ function ProtectedRoute({
 
   /*
   |--------------------------------------------------------------------------
-  | PROFILE ACCESS ERROR
+  | PROFILE ERROR
   |--------------------------------------------------------------------------
   */
 
@@ -479,7 +529,7 @@ function ProtectedRoute({
 
   /*
   |--------------------------------------------------------------------------
-  | ACCOUNT MUST BE ACTIVE
+  | ACTIVE ACCOUNT CHECK
   |--------------------------------------------------------------------------
   */
 
@@ -507,9 +557,7 @@ function ProtectedRoute({
   */
 
   const normalizedRole =
-    normalizeValue(
-      profile.role
-    );
+    normalizeValue(profile.role);
 
   const isAllowed =
     normalizedAllowedRoles.includes(
@@ -520,11 +568,51 @@ function ProtectedRoute({
     return (
       <Navigate
         to={getRoleDashboard(
-          profile.role
+          profile.role,
+          isTreasurer
         )}
         replace
       />
     );
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | PORTAL AUTHORIZATION
+  |--------------------------------------------------------------------------
+  |
+  | Both Treasurer and normal teachers/officers use the database role
+  | "Approver". Their active office assignment determines which portal
+  | they are allowed to access.
+  |--------------------------------------------------------------------------
+  */
+
+  if (
+    normalizedRole === "approver"
+  ) {
+    if (
+      portal === "treasurer" &&
+      !isTreasurer
+    ) {
+      return (
+        <Navigate
+          to="/approver/dashboard"
+          replace
+        />
+      );
+    }
+
+    if (
+      portal === "approver" &&
+      isTreasurer
+    ) {
+      return (
+        <Navigate
+          to="/treasurer/dashboard"
+          replace
+        />
+      );
+    }
   }
 
   return <Outlet />;

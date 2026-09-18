@@ -1,5 +1,7 @@
-import { useNavigate } from "react-router-dom";
-import { NavLink } from "react-router-dom";
+import {
+  NavLink,
+  useNavigate,
+} from "react-router-dom";
 
 import Swal from "sweetalert2";
 
@@ -8,11 +10,9 @@ import smartClearLogo from "../../assets/smartclear-logo.png";
 
 import {
   FaBell,
-  FaCheckCircle,
-  FaClipboardList,
+  FaGraduationCap,
   FaHome,
   FaSignOutAlt,
-  FaTimesCircle,
   FaUser,
 } from "react-icons/fa";
 
@@ -22,32 +22,22 @@ function Sidebar() {
   const menuItems = [
     {
       name: "Dashboard",
-      path: "/approver/dashboard",
+      path: "/treasurer/dashboard",
       icon: <FaHome />,
     },
     {
-      name: "Pending Requests",
-      path: "/approver/pending",
-      icon: <FaClipboardList />,
-    },
-    {
-      name: "Approved Requests",
-      path: "/approver/approved",
-      icon: <FaCheckCircle />,
-    },
-    {
-      name: "Rejected Requests",
-      path: "/approver/rejected",
-      icon: <FaTimesCircle />,
+      name: "Ready for Enrollment",
+      path: "/treasurer/ready-for-enrollment",
+      icon: <FaGraduationCap />,
     },
     {
       name: "Notifications",
-      path: "/approver/notifications",
+      path: "/treasurer/notifications",
       icon: <FaBell />,
     },
     {
       name: "Profile",
-      path: "/approver/profile",
+      path: "/treasurer/profile",
       icon: <FaUser />,
     },
   ];
@@ -56,7 +46,7 @@ function Sidebar() {
     const result = await Swal.fire({
       icon: "question",
       title: "Log Out?",
-      text: "Are you sure you want to end your session?",
+      text: "Are you sure you want to end your Treasurer session?",
       showCancelButton: true,
       confirmButtonText: "Log Out",
       cancelButtonText: "Cancel",
@@ -82,7 +72,7 @@ function Sidebar() {
         replace: true,
       });
     } catch (error) {
-      Swal.fire({
+      await Swal.fire({
         icon: "error",
         title: "Logout Failed",
         text:
@@ -111,7 +101,7 @@ function Sidebar() {
             </h1>
 
             <p className="mt-0.5 truncate text-sm text-blue-200">
-              Approver Portal
+              Treasurer Portal
             </p>
           </div>
         </div>
@@ -127,8 +117,8 @@ function Sidebar() {
                 className={({ isActive }) =>
                   `flex items-center gap-4 rounded-xl px-4 py-3 transition-all ${
                     isActive
-                      ? "bg-white font-semibold text-blue-900"
-                      : "hover:bg-blue-800"
+                      ? "bg-white font-semibold text-blue-900 shadow-md"
+                      : "text-blue-50 hover:bg-blue-800"
                   }`
                 }
               >
@@ -154,7 +144,7 @@ function Sidebar() {
         >
           <FaSignOutAlt className="shrink-0" />
 
-          Logout
+          <span>Logout</span>
         </button>
       </div>
     </aside>

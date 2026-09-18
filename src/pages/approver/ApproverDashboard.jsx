@@ -13,9 +13,6 @@ import Swal from "sweetalert2";
 import { AnimatePresence, motion } from "framer-motion";
 
 import ApproverLayout from "../../layouts/ApproverLayout";
-import PaymentRecordsImport from "../../components/approver/PaymentRecordsImport";
-import UpdatePaymentModal from "../../components/approver/UpdatePaymentModal";
-import PaymentHistoryModal from "../../components/approver/PaymentHistoryModal";
 import { supabase } from "../../services/supabase";
 
 import {
@@ -38,10 +35,8 @@ import {
   FaEye,
   FaEyeSlash,
   FaFileAlt,
-  FaDownload,
   FaGraduationCap,
   FaKey,
-  FaMoneyBillWave,
   FaPlus,
   FaSave,
   FaSearch,
@@ -52,7 +47,6 @@ import {
   FaTrash,
   FaUserGraduate,
   FaUsers,
-  FaHistory,
 } from "react-icons/fa";
 
 /*
@@ -92,61 +86,6 @@ const statusClass = (status) => {
     default:
       return "bg-slate-100 text-slate-700";
   }
-};
-
-const isFinancialOfficeName = (value) => {
-  const normalized = String(value || "")
-    .trim()
-    .toLowerCase();
-
-  return [
-    "treasurer",
-    "accounting",
-    "cashier",
-    "finance",
-  ].some((keyword) =>
-    normalized.includes(keyword)
-  );
-};
-
-const formatCurrency = (value) => {
-  const amount = Number(value);
-
-  if (!Number.isFinite(amount)) {
-    return "N/A";
-  }
-
-  return new Intl.NumberFormat("en-PH", {
-    style: "currency",
-    currency: "PHP",
-  }).format(amount);
-};
-
-const financialDecisionClass = (decision) => {
-  switch (decision) {
-    case "Fully Paid":
-      return "bg-emerald-100 text-emerald-700";
-
-    case "Payment Agreement":
-      return "bg-amber-100 text-amber-700";
-
-    case "Deferred Payment":
-      return "bg-blue-100 text-blue-700";
-
-    case "Not Cleared":
-      return "bg-red-100 text-red-700";
-
-    default:
-      return "bg-slate-100 text-slate-600";
-  }
-};
-
-const DEFAULT_FINANCIAL_FORM = {
-  decision: "Fully Paid",
-  remainingBalance: "",
-  paymentDueDate: "",
-  consentConfirmed: false,
-  remarks: "",
 };
 
 const DEFAULT_REQUIREMENT_FORM = {
@@ -327,33 +266,6 @@ const formatBlockLabel = (value) => {
   return `Block ${blockCode}`;
 };
 
-const buildPaymentRecordKey = ({
-  studentId,
-  schoolYear,
-  semester,
-}) =>
-  [
-    String(studentId || "").trim(),
-    normalizeKeyPart(schoolYear),
-    normalizeKeyPart(semester),
-  ].join("|");
-
-const paymentStatusClass = (status) => {
-  switch (status) {
-    case "Cleared":
-      return "bg-emerald-100 text-emerald-700";
-
-    case "With Balance":
-      return "bg-amber-100 text-amber-700";
-
-    case "No Record":
-      return "bg-slate-100 text-slate-600";
-
-    default:
-      return "bg-slate-100 text-slate-600";
-  }
-};
-
 function ApproverDashboard() {
   const location =
     useLocation();
@@ -427,21 +339,6 @@ function ApproverDashboard() {
   const [isRegistrarVerifier, setIsRegistrarVerifier] =
     useState(false);
 
-  const [isFinancialApprover, setIsFinancialApprover] =
-    useState(false);
-
-  const [treasurerStatusFilter, setTreasurerStatusFilter] =
-    useState("All");
-
-  const [treasurerCourseFilter, setTreasurerCourseFilter] =
-    useState("All");
-
-  const [treasurerYearFilter, setTreasurerYearFilter] =
-    useState("All");
-
-  const [treasurerCycleFilter, setTreasurerCycleFilter] =
-    useState("All");
-
   const [clearanceReference, setClearanceReference] =
     useState("");
 
@@ -453,30 +350,6 @@ function ApproverDashboard() {
 
   const [verificationResult, setVerificationResult] =
     useState(null);
-
-  const [selectedFinancialStep, setSelectedFinancialStep] =
-    useState(null);
-
-  const [showFinancialModal, setShowFinancialModal] =
-    useState(false);
-
-  const [savingFinancialDecision, setSavingFinancialDecision] =
-    useState(false);
-
-  const [financialForm, setFinancialForm] =
-    useState(DEFAULT_FINANCIAL_FORM);
-
-  const [showPaymentImport, setShowPaymentImport] =
-    useState(false);
-
-  const [selectedPaymentStep, setSelectedPaymentStep] =
-    useState(null);
-
-  const [showUpdatePayment, setShowUpdatePayment] =
-    useState(false);
-
-  const [showPaymentHistory, setShowPaymentHistory] =
-    useState(false);
 
   const [reviewStatusFilter, setReviewStatusFilter] =
     useState("All");
@@ -642,7 +515,6 @@ function ApproverDashboard() {
         );
 
         setIsRegistrarVerifier(false);
-        setIsFinancialApprover(false);
       } else {
         const hasRegistrarAssignment = (
           officeAssignments || []
@@ -657,17 +529,6 @@ function ApproverDashboard() {
           hasRegistrarAssignment
         );
 
-        const hasFinancialAssignment = (
-          officeAssignments || []
-        ).some((assignment) =>
-          isFinancialOfficeName(
-            assignment.offices?.office_name
-          )
-        );
-
-        setIsFinancialApprover(
-          hasFinancialAssignment
-        );
       }
 
       /*
@@ -728,14 +589,7 @@ function ApproverDashboard() {
           approver_id,
           status,
           remarks,
-          reviewed_at,
-          financial_decision,
-          remaining_balance,
-          payment_due_date,
-          consent_confirmed,
-          financial_notes,
-          financial_reviewed_at,
-          financial_reviewed_by
+          reviewed_at
         `)
         .eq(
           "approver_id",
@@ -854,50 +708,6 @@ function ApproverDashboard() {
         if (error) throw error;
 
         students = data || [];
-      }
-
-      /*
-      |--------------------------------------------------------------------------
-      | LOAD IMPORTED TREASURER PAYMENT RECORDS
-      |--------------------------------------------------------------------------
-      |
-      | payment_records is matched using the internal student UUID plus the
-      | exact school year and semester of the clearance request.
-      |--------------------------------------------------------------------------
-      */
-
-      let paymentRecords = [];
-
-      if (studentIds.length > 0) {
-        const {
-          data: paymentRows,
-          error: paymentRecordError,
-        } = await supabase
-          .from("payment_records")
-          .select(`
-            id,
-            student_id,
-            school_year,
-            semester,
-            amount_due,
-            amount_paid,
-            balance,
-            payment_status,
-            reference_number,
-            remarks,
-            imported_at,
-            updated_at
-          `)
-          .in("student_id", studentIds);
-
-        if (paymentRecordError) {
-          console.warn(
-            "Unable to load payment records:",
-            paymentRecordError
-          );
-        } else {
-          paymentRecords = paymentRows || [];
-        }
       }
 
       /*
@@ -1171,16 +981,6 @@ if (stepIds.length > 0) {
         ])
       );
 
-      const paymentRecordMap = new Map(
-        paymentRecords.map((record) => [
-          buildPaymentRecordKey({
-            studentId: record.student_id,
-            schoolYear: record.school_year,
-            semester: record.semester,
-          }),
-          record,
-        ])
-      );
 
       /*
       |--------------------------------------------------------------------------
@@ -1391,14 +1191,6 @@ if (stepIds.length > 0) {
             submissionMap.get(step.id) ||
             null;
 
-          const paymentRecord =
-            paymentRecordMap.get(
-              buildPaymentRecordKey({
-                studentId: request.student_id,
-                schoolYear: request.school_year,
-                semester: request.semester,
-              })
-            ) || null;
 
           const courseCode =
             course?.course_code ||
@@ -1436,16 +1228,6 @@ if (stepIds.length > 0) {
             office?.office_code ||
             "";
 
-          const isFinancialOffice =
-            targetType === "Office" &&
-            (
-              isFinancialOfficeName(
-                office?.office_name
-              ) ||
-              isFinancialOfficeName(
-                office?.office_code
-              )
-            );
 
           /*
           |--------------------------------------------------------------------------
@@ -1495,7 +1277,6 @@ if (stepIds.length > 0) {
             subject,
             office,
             submission,
-            paymentRecord,
             classOffering,
             classOfferingId:
               classOffering?.id || null,
@@ -1518,7 +1299,6 @@ if (stepIds.length > 0) {
             targetType,
             targetName,
             targetCode,
-            isFinancialOffice,
 
             blockKey,
             targetKey,
@@ -2618,9 +2398,9 @@ if (stepIds.length > 0) {
   | AUTOMATICALLY OPEN THE CORRECT WORKSPACE
   |--------------------------------------------------------------------------
   |
-  | Office-only accounts such as the Treasurer should not land on an empty
-  | Assigned Classes screen. When the approver has office work but no teaching
-  | classes, the dashboard opens Office Clearances automatically.
+  | Office-only approvers should not land on an empty Assigned Classes screen.
+  | When the approver has office work but no teaching classes, the dashboard
+  | opens Office Clearances automatically.
   |--------------------------------------------------------------------------
   */
 
@@ -3943,329 +3723,6 @@ if (stepIds.length > 0) {
     approver?.id,
   ]);
 
-  /*
-  |--------------------------------------------------------------------------
-  | TREASURER / ACCOUNTING FINANCIAL REVIEW
-  |--------------------------------------------------------------------------
-  */
-
-  const openFinancialReview = (
-    item,
-    initialDecision = "Fully Paid"
-  ) => {
-    if (!item?.isFinancialOffice) {
-      return;
-    }
-
-    setSelectedFinancialStep(item);
-
-    const importedPayment =
-      item.paymentRecord || null;
-
-    const suggestedDecision =
-      importedPayment?.payment_status === "Cleared"
-        ? "Fully Paid"
-        : importedPayment?.payment_status === "With Balance"
-        ? "Not Cleared"
-        : initialDecision;
-
-    setFinancialForm({
-      decision:
-        item.financial_decision ||
-        suggestedDecision,
-      remainingBalance:
-        item.remaining_balance ??
-        importedPayment?.balance ??
-        "",
-      paymentDueDate:
-        item.payment_due_date || "",
-      consentConfirmed:
-        Boolean(item.consent_confirmed),
-      remarks:
-        item.financial_notes || "",
-    });
-
-    setShowFinancialModal(true);
-  };
-
-  const closeFinancialReview = () => {
-    if (savingFinancialDecision) {
-      return;
-    }
-
-    setShowFinancialModal(false);
-    setSelectedFinancialStep(null);
-    setFinancialForm(
-      DEFAULT_FINANCIAL_FORM
-    );
-  };
-
-  const handleFinancialFormChange = (
-    event
-  ) => {
-    const {
-      name,
-      value,
-      type,
-      checked,
-    } = event.target;
-
-    setFinancialForm((current) => {
-      const next = {
-        ...current,
-        [name]:
-          type === "checkbox"
-            ? checked
-            : value,
-      };
-
-      if (
-        name === "decision" &&
-        value === "Fully Paid"
-      ) {
-        next.remainingBalance = "0";
-        next.paymentDueDate = "";
-        next.consentConfirmed = false;
-      }
-
-      if (
-        name === "decision" &&
-        value === "Not Cleared"
-      ) {
-        next.paymentDueDate = "";
-        next.consentConfirmed = false;
-      }
-
-      return next;
-    });
-  };
-
-  const submitFinancialReview = async (
-    event
-  ) => {
-    event.preventDefault();
-
-    if (!selectedFinancialStep) {
-      return;
-    }
-
-    const decision =
-      financialForm.decision;
-
-    const isConditional = [
-      "Payment Agreement",
-      "Deferred Payment",
-    ].includes(decision);
-
-    const balance =
-      decision === "Fully Paid"
-        ? 0
-        : Number(
-            financialForm.remainingBalance
-          );
-
-    const remarks =
-      financialForm.remarks.trim();
-
-    if (
-      decision !== "Fully Paid" &&
-      (
-        !Number.isFinite(balance) ||
-        balance < 0
-      )
-    ) {
-      await Swal.fire({
-        icon: "warning",
-        title: "Valid Balance Required",
-        text:
-          "Enter the student's current remaining balance.",
-      });
-
-      return;
-    }
-
-    if (
-      isConditional &&
-      balance <= 0
-    ) {
-      await Swal.fire({
-        icon: "warning",
-        title:
-          "Remaining Balance Required",
-        text:
-          "Conditional clearance requires a remaining balance greater than zero.",
-      });
-
-      return;
-    }
-
-    if (
-      isConditional &&
-      !financialForm.paymentDueDate
-    ) {
-      await Swal.fire({
-        icon: "warning",
-        title:
-          "Payment Date Required",
-        text:
-          "Select the agreed date when the remaining balance will be paid.",
-      });
-
-      return;
-    }
-
-    if (
-      isConditional &&
-      !financialForm.consentConfirmed
-    ) {
-      await Swal.fire({
-        icon: "warning",
-        title:
-          "Consent Confirmation Required",
-        text:
-          "Confirm that the student or parent accepted the payment agreement.",
-      });
-
-      return;
-    }
-
-    if (
-      (
-        isConditional ||
-        decision === "Not Cleared"
-      ) &&
-      !remarks
-    ) {
-      await Swal.fire({
-        icon: "warning",
-        title: "Remarks Required",
-        text:
-          decision === "Not Cleared"
-            ? "Explain why the student is not financially cleared."
-            : "Record the payment agreement or deferred-payment details.",
-      });
-
-      return;
-    }
-
-    const confirmation =
-      await Swal.fire({
-        icon:
-          decision === "Not Cleared"
-            ? "warning"
-            : "question",
-        title:
-          decision === "Not Cleared"
-            ? "Mark as Not Cleared?"
-            : "Save Financial Decision?",
-        html: `
-          <div style="text-align:left;line-height:1.65">
-            <p><strong>Student:</strong> ${
-              selectedFinancialStep.student
-                ?.full_name || "Student"
-            }</p>
-            <p><strong>Decision:</strong> ${decision}</p>
-            <p><strong>Balance:</strong> ${formatCurrency(balance)}</p>
-            ${
-              isConditional
-                ? `<p><strong>Payment due:</strong> ${financialForm.paymentDueDate}</p>`
-                : ""
-            }
-          </div>
-        `,
-        showCancelButton: true,
-        confirmButtonText:
-          decision === "Not Cleared"
-            ? "Confirm Not Cleared"
-            : "Save Decision",
-        confirmButtonColor:
-          decision === "Not Cleared"
-            ? "#dc2626"
-            : "#15803d",
-        cancelButtonText: "Cancel",
-      });
-
-    if (!confirmation.isConfirmed) {
-      return;
-    }
-
-    try {
-      setSavingFinancialDecision(true);
-      setReviewingStepId(
-        selectedFinancialStep.id
-      );
-
-      const { data, error } =
-        await supabase.rpc(
-          "review_financial_clearance_step",
-          {
-            p_step_id:
-              selectedFinancialStep.id,
-            p_decision: decision,
-            p_remaining_balance:
-              decision === "Fully Paid"
-                ? 0
-                : balance,
-            p_payment_due_date:
-              isConditional
-                ? financialForm.paymentDueDate
-                : null,
-            p_consent_confirmed:
-              isConditional
-                ? financialForm.consentConfirmed
-                : false,
-            p_remarks:
-              remarks || null,
-          }
-        );
-
-      if (error) {
-        throw error;
-      }
-
-      closeFinancialReview();
-
-      await Swal.fire({
-        icon:
-          decision === "Not Cleared"
-            ? "info"
-            : "success",
-        title:
-          data?.requestCompleted
-            ? "Clearance Completed"
-            : decision === "Not Cleared"
-            ? "Student Not Cleared"
-            : "Financial Clearance Saved",
-        text:
-          data?.requestCompleted
-            ? "All required clearance steps for this student are now approved."
-            : decision === "Not Cleared"
-            ? "The financial step was marked as Not Cleared and the reason was recorded."
-            : decision === "Fully Paid"
-            ? "The student was recorded as fully paid and financially cleared."
-            : "The student was conditionally cleared under the recorded payment agreement.",
-      });
-
-      await loadDashboard();
-    } catch (error) {
-      console.error(
-        "Financial clearance review error:",
-        error
-      );
-
-      await Swal.fire({
-        icon: "error",
-        title:
-          "Unable to Save Financial Review",
-        text:
-          error?.message ||
-          "The financial clearance decision could not be saved.",
-      });
-    } finally {
-      setSavingFinancialDecision(false);
-      setReviewingStepId(null);
-    }
-  };
 
   /*
   |--------------------------------------------------------------------------
@@ -4275,14 +3732,6 @@ if (stepIds.length > 0) {
 
   const approveStep = async (item) => {
 
-    if (item.isFinancialOffice) {
-      openFinancialReview(
-        item,
-        "Fully Paid"
-      );
-
-      return;
-    }
 
     /*
     Office approvers may approve their exact assigned office step directly.
@@ -4535,14 +3984,6 @@ if (stepIds.length > 0) {
 
   const rejectStep = async (item) => {
 
-    if (item.isFinancialOffice) {
-      openFinancialReview(
-        item,
-        "Not Cleared"
-      );
-
-      return;
-    }
 
     /*
     Office approvers may reject their exact assigned office step directly
@@ -4722,305 +4163,6 @@ if (stepIds.length > 0) {
     setVerificationResult(null);
   };
 
-  /*
-  |--------------------------------------------------------------------------
-  | TREASURER / ACCOUNTING WORKSPACE DATA
-  |--------------------------------------------------------------------------
-  */
-
-  const financialSteps = useMemo(
-    () =>
-      assignedSteps.filter(
-        (step) => step.isFinancialOffice
-      ),
-    [assignedSteps]
-  );
-
-  const financialCourseOptions = useMemo(
-    () =>
-      [...new Set(
-        financialSteps
-          .map((step) => step.courseCode)
-          .filter(Boolean)
-      )].sort((first, second) =>
-        first.localeCompare(second)
-      ),
-    [financialSteps]
-  );
-
-  const financialYearOptions = useMemo(
-    () =>
-      [...new Set(
-        financialSteps
-          .map((step) => step.yearLevel)
-          .filter(Boolean)
-      )].sort(
-        (first, second) =>
-          getYearSortValue(first) -
-          getYearSortValue(second)
-      ),
-    [financialSteps]
-  );
-
-  const financialCycleOptions = useMemo(
-    () =>
-      [...new Set(
-        financialSteps
-          .map((step) =>
-            [step.semester, step.schoolYear]
-              .filter(Boolean)
-              .join(" • ")
-          )
-          .filter(Boolean)
-      )].sort((first, second) =>
-        second.localeCompare(first)
-      ),
-    [financialSteps]
-  );
-
-  const filteredFinancialSteps = useMemo(() => {
-    const normalizedSearch = searchTerm
-      .trim()
-      .toLowerCase();
-
-    return financialSteps
-      .filter((step) => {
-        if (
-          treasurerStatusFilter !== "All" &&
-          step.status !== treasurerStatusFilter
-        ) {
-          return false;
-        }
-
-        if (
-          treasurerCourseFilter !== "All" &&
-          step.courseCode !== treasurerCourseFilter
-        ) {
-          return false;
-        }
-
-        if (
-          treasurerYearFilter !== "All" &&
-          step.yearLevel !== treasurerYearFilter
-        ) {
-          return false;
-        }
-
-        const cycleLabel = [
-          step.semester,
-          step.schoolYear,
-        ]
-          .filter(Boolean)
-          .join(" • ");
-
-        if (
-          treasurerCycleFilter !== "All" &&
-          cycleLabel !== treasurerCycleFilter
-        ) {
-          return false;
-        }
-
-        if (!normalizedSearch) {
-          return true;
-        }
-
-        return [
-          step.student?.full_name,
-          step.student?.student_id,
-          step.student?.email,
-          step.courseCode,
-          step.courseName,
-          step.yearLevel,
-          step.blockCode,
-          step.semester,
-          step.schoolYear,
-          step.financial_decision,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedSearch);
-      })
-      .sort((first, second) => {
-        const statusOrder = {
-          Pending: 0,
-          Rejected: 1,
-          Approved: 2,
-        };
-
-        const statusDifference =
-          (statusOrder[first.status] ?? 3) -
-          (statusOrder[second.status] ?? 3);
-
-        if (statusDifference !== 0) {
-          return statusDifference;
-        }
-
-        return (
-          first.student?.full_name || ""
-        ).localeCompare(
-          second.student?.full_name || ""
-        );
-      });
-  }, [
-    financialSteps,
-    searchTerm,
-    treasurerStatusFilter,
-    treasurerCourseFilter,
-    treasurerYearFilter,
-    treasurerCycleFilter,
-  ]);
-
-  const financialSummary = useMemo(
-    () => ({
-      pending: financialSteps.filter(
-        (step) => step.status === "Pending"
-      ).length,
-      cleared: financialSteps.filter(
-        (step) => step.status === "Approved"
-      ).length,
-      agreements: financialSteps.filter(
-        (step) =>
-          [
-            "Payment Agreement",
-            "Deferred Payment",
-          ].includes(step.financial_decision)
-      ).length,
-      notCleared: financialSteps.filter(
-        (step) =>
-          step.status === "Rejected" ||
-          step.financial_decision === "Not Cleared"
-      ).length,
-    }),
-    [financialSteps]
-  );
-
-  const isDedicatedFinancialView =
-    isFinancialApprover &&
-    assignedClassOfferings.length === 0;
-
-
-  const exportPaymentRecords = async () => {
-    try {
-      if (!filteredFinancialSteps.length) {
-        await Swal.fire({
-          icon: "info",
-          title: "No Records to Export",
-          text: "There are no financial records matching the current filters.",
-        });
-        return;
-      }
-
-      const escapeCsv = (value) => {
-        const normalized =
-          value === null || value === undefined
-            ? ""
-            : String(value);
-
-        return `"${normalized.replace(/"/g, '""')}"`;
-      };
-
-      const headers = [
-        "Student ID",
-        "Student Name",
-        "Course",
-        "Year Level",
-        "Block",
-        "School Year",
-        "Semester",
-        "Amount Due",
-        "Amount Paid",
-        "Balance",
-        "Payment Status",
-        "OR / Reference Number",
-        "Payment Remarks",
-        "Clearance Status",
-        "Treasurer Decision",
-        "Clearance Remarks",
-        "Financial Record Updated",
-      ];
-
-      const rows = filteredFinancialSteps.map((item) => {
-        const record = item.paymentRecord || {};
-
-        return [
-          item.student?.student_id || "",
-          item.student?.full_name || "",
-          item.courseCode || item.courseName || "",
-          item.yearLevel || "",
-          item.blockCode || "",
-          item.schoolYear || record.school_year || "",
-          item.semester || record.semester || "",
-          Number(record.amount_due || 0).toFixed(2),
-          Number(record.amount_paid || 0).toFixed(2),
-          Number(record.balance || 0).toFixed(2),
-          record.payment_status || "No Record",
-          record.reference_number || "",
-          record.remarks || "",
-          item.status || "",
-          item.financial_decision || "",
-          item.remarks || "",
-          record.updated_at
-            ? new Date(record.updated_at).toLocaleString("en-PH")
-            : "",
-        ];
-      });
-
-      const csv = [
-        headers.map(escapeCsv).join(","),
-        ...rows.map((row) =>
-          row.map(escapeCsv).join(",")
-        ),
-      ].join("\\r\\n");
-
-      const blob = new Blob(
-        ["\\uFEFF", csv],
-        {
-          type: "text/csv;charset=utf-8;",
-        }
-      );
-
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-
-      const now = new Date();
-      const datePart = [
-        now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, "0"),
-        String(now.getDate()).padStart(2, "0"),
-      ].join("-");
-
-      link.href = url;
-      link.download =
-        `SmartClear-Payment-Records-${datePart}.csv`;
-
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      await Swal.fire({
-        icon: "success",
-        title: "Payment Records Exported",
-        text: `${filteredFinancialSteps.length} record(s) were exported and can be opened in Excel.`,
-        timer: 1800,
-        showConfirmButton: false,
-      });
-    } catch (error) {
-      console.error(
-        "Payment records export error:",
-        error
-      );
-
-      await Swal.fire({
-        icon: "error",
-        title: "Export Failed",
-        text:
-          error?.message ||
-          "Unable to export the payment records.",
-      });
-    }
-  };
 
   /*
   |--------------------------------------------------------------------------
@@ -5046,671 +4188,6 @@ if (stepIds.length > 0) {
 
   return (
     <ApproverLayout>
-      {isDedicatedFinancialView ? (
-        <div className="space-y-5 pt-10 md:pt-12">
-          <motion.section
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35 }}
-            className="overflow-hidden rounded-3xl border border-slate-200 bg-slate-950 text-white shadow-sm"
-          >
-            <div className="relative px-5 py-5 sm:px-6 sm:py-6 md:px-7 md:py-6">
-              <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
-              <div className="absolute -bottom-28 left-1/3 h-56 w-56 rounded-full bg-blue-500/10 blur-3xl" />
-
-              <div className="relative flex flex-col gap-5 2xl:flex-row 2xl:items-center 2xl:justify-between">
-                <div className="flex min-w-0 items-start gap-4">
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/15 text-2xl text-emerald-300 ring-1 ring-inset ring-emerald-400/20">
-                    <FaMoneyBillWave />
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-bold uppercase tracking-[0.18em] text-emerald-300">
-                      Treasurer / Cashier Workspace
-                    </p>
-
-                    <h1 className="mt-1.5 text-2xl font-black tracking-tight sm:text-3xl md:text-4xl">
-                      Financial Clearance
-                    </h1>
-
-                    <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300 md:text-base">
-                      Review student balances, payment agreements, and financial clearance decisions from one organized queue.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap 2xl:justify-end">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      navigate(
-                        "/approver/ready-for-enrollment"
-                      )
-                    }
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-5 py-3 font-bold text-white transition hover:bg-white/15"
-                  >
-                    <FaGraduationCap />
-                    Ready for Enrollment
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={loadDashboard}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-5 py-3 font-bold text-slate-950 transition hover:bg-emerald-400"
-                  >
-                    <FaSyncAlt />
-                    Refresh Queue
-                  </button>
-                </div>
-              </div>
-            </div>
-          </motion.section>
-
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {[
-              {
-                label: "Pending Review",
-                value: financialSummary.pending,
-                icon: <FaClipboardList />,
-                tone: "bg-amber-50 text-amber-700 ring-amber-200",
-              },
-              {
-                label: "Financially Cleared",
-                value: financialSummary.cleared,
-                icon: <FaCheckCircle />,
-                tone: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-              },
-              {
-                label: "With Agreement",
-                value: financialSummary.agreements,
-                icon: <FaFileAlt />,
-                tone: "bg-blue-50 text-blue-700 ring-blue-200",
-              },
-              {
-                label: "Not Cleared",
-                value: financialSummary.notCleared,
-                icon: <FaTimesCircle />,
-                tone: "bg-red-50 text-red-700 ring-red-200",
-              },
-            ].map((item, index) => (
-              <motion.div
-                key={item.label}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{
-                  duration: 0.28,
-                  delay: index * 0.05,
-                }}
-                className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-500">
-                      {item.label}
-                    </p>
-                    <p className="mt-2 text-3xl font-black text-slate-900">
-                      {item.value}
-                    </p>
-                  </div>
-
-                  <div
-                    className={`flex h-12 w-12 items-center justify-center rounded-xl text-lg ring-1 ring-inset ${item.tone}`}
-                  >
-                    {item.icon}
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </section>
-
-          <motion.section
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, delay: 0.08 }}
-            className="rounded-3xl border border-slate-200 bg-white shadow-sm"
-          >
-            <div className="border-b border-slate-200 p-5 md:p-6">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-col gap-1">
-                  <h2 className="text-xl font-black text-slate-900">
-                    Student Financial Queue
-                  </h2>
-                  <p className="text-sm leading-6 text-slate-500">
-                    Pending records appear first. Use the filters to focus on a specific course, year level, or clearance cycle.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={exportPaymentRecords}
-                    className="inline-flex w-fit items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-                  >
-                    <FaDownload />
-                    Export Records
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setShowPaymentImport(true)
-                    }
-                    className="inline-flex w-fit items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-black text-white transition hover:bg-emerald-800"
-                  >
-                    <FaFileAlt />
-                    Import Payment Records
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_180px_170px_170px_210px]">
-                <div className="relative">
-                  <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(event) =>
-                      setSearchTerm(event.target.value)
-                    }
-                    placeholder="Search student name or ID..."
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-base outline-none transition focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-100"
-                  />
-                </div>
-
-                <select
-                  value={treasurerStatusFilter}
-                  onChange={(event) =>
-                    setTreasurerStatusFilter(
-                      event.target.value
-                    )
-                  }
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-base font-semibold text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-                >
-                  <option value="All">All Statuses</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Approved">Approved</option>
-                  <option value="Rejected">Rejected</option>
-                </select>
-
-                <select
-                  value={treasurerCourseFilter}
-                  onChange={(event) =>
-                    setTreasurerCourseFilter(
-                      event.target.value
-                    )
-                  }
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-base font-semibold text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-                >
-                  <option value="All">All Courses</option>
-                  {financialCourseOptions.map(
-                    (course) => (
-                      <option
-                        key={course}
-                        value={course}
-                      >
-                        {course}
-                      </option>
-                    )
-                  )}
-                </select>
-
-                <select
-                  value={treasurerYearFilter}
-                  onChange={(event) =>
-                    setTreasurerYearFilter(
-                      event.target.value
-                    )
-                  }
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-base font-semibold text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-                >
-                  <option value="All">All Year Levels</option>
-                  {financialYearOptions.map(
-                    (yearLevel) => (
-                      <option
-                        key={yearLevel}
-                        value={yearLevel}
-                      >
-                        {yearLevel}
-                      </option>
-                    )
-                  )}
-                </select>
-
-                <select
-                  value={treasurerCycleFilter}
-                  onChange={(event) =>
-                    setTreasurerCycleFilter(
-                      event.target.value
-                    )
-                  }
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-base font-semibold text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-                >
-                  <option value="All">All Clearance Cycles</option>
-                  {financialCycleOptions.map(
-                    (cycle) => (
-                      <option
-                        key={cycle}
-                        value={cycle}
-                      >
-                        {cycle}
-                      </option>
-                    )
-                  )}
-                </select>
-              </div>
-            </div>
-
-            <div className="hidden overflow-x-auto lg:block">
-              <table className="min-w-full">
-                <thead className="bg-slate-50">
-                  <tr className="border-b border-slate-200">
-                    <th className="px-6 py-4 text-left text-xs font-black uppercase tracking-wider text-slate-500">Student</th>
-                    <th className="px-6 py-4 text-left text-xs font-black uppercase tracking-wider text-slate-500">Academic Assignment</th>
-                    <th className="px-6 py-4 text-left text-xs font-black uppercase tracking-wider text-slate-500">Clearance Cycle</th>
-                    <th className="px-6 py-4 text-left text-xs font-black uppercase tracking-wider text-slate-500">Financial Record</th>
-                    <th className="px-6 py-4 text-left text-xs font-black uppercase tracking-wider text-slate-500">Status</th>
-                    <th className="px-6 py-4 text-right text-xs font-black uppercase tracking-wider text-slate-500">Action</th>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-slate-100">
-                  {filteredFinancialSteps.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan="6"
-                        className="px-6 py-16 text-center"
-                      >
-                        <FaMoneyBillWave className="mx-auto text-4xl text-slate-300" />
-                        <p className="mt-4 text-base font-bold text-slate-700">
-                          No financial clearance records found
-                        </p>
-                        <p className="mt-1 text-sm text-slate-500">
-                          Adjust the filters or refresh the queue.
-                        </p>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredFinancialSteps.map(
-                      (item, index) => (
-                        <motion.tr
-                          key={item.id}
-                          initial={{ opacity: 0, y: 6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{
-                            duration: 0.22,
-                            delay: Math.min(
-                              index * 0.025,
-                              0.2
-                            ),
-                          }}
-                          className="transition hover:bg-slate-50"
-                        >
-                          <td className="px-6 py-5">
-                            <p className="font-black text-slate-900">
-                              {item.student?.full_name ||
-                                "No Name"}
-                            </p>
-                            <p className="mt-1 text-sm text-slate-500">
-                              {item.student?.student_id ||
-                                "No Student ID"}
-                            </p>
-                          </td>
-
-                          <td className="px-6 py-5">
-                            <p className="font-bold text-slate-800">
-                              {item.courseCode} · {item.yearLevel}
-                            </p>
-                            <p className="mt-1 text-sm text-slate-500">
-                              {formatBlockLabel(
-                                item.blockCode
-                              )}
-                            </p>
-                          </td>
-
-                          <td className="px-6 py-5">
-                            <p className="font-bold text-slate-800">
-                              {item.semester || "N/A"}
-                            </p>
-                            <p className="mt-1 text-sm text-slate-500">
-                              {item.schoolYear || "N/A"}
-                            </p>
-                          </td>
-
-                          <td className="px-6 py-5">
-                            {item.paymentRecord ? (
-                              <div className="space-y-2">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span
-                                    className={`inline-flex rounded-full px-3 py-1.5 text-xs font-black ${paymentStatusClass(
-                                      item.paymentRecord.payment_status
-                                    )}`}
-                                  >
-                                    {item.paymentRecord.payment_status}
-                                  </span>
-
-                                  <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-blue-700">
-                                    Imported Record
-                                  </span>
-                                </div>
-
-                                <p className="text-sm font-bold text-slate-700">
-                                  Balance: {formatCurrency(
-                                    item.paymentRecord.balance
-                                  )}
-                                </p>
-
-                                <p className="text-xs text-slate-500">
-                                  Paid {formatCurrency(
-                                    item.paymentRecord.amount_paid
-                                  )} of {formatCurrency(
-                                    item.paymentRecord.amount_due
-                                  )}
-                                </p>
-
-                                {item.paymentRecord.reference_number && (
-                                  <p className="text-xs font-semibold text-slate-500">
-                                    Ref: {item.paymentRecord.reference_number}
-                                  </p>
-                                )}
-
-                                <p className="text-xs text-slate-400">
-                                  Updated {formatDate(
-                                    item.paymentRecord.updated_at ||
-                                      item.paymentRecord.imported_at
-                                  )}
-                                </p>
-                              </div>
-                            ) : (
-                              <div>
-                                <span className="inline-flex rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-600">
-                                  No Imported Record
-                                </span>
-                                <p className="mt-2 text-xs text-slate-400">
-                                  Import the Treasurer spreadsheet to match this student automatically.
-                                </p>
-                              </div>
-                            )}
-
-                            {item.financial_decision && (
-                              <div className="mt-3 border-t border-slate-100 pt-3">
-                                <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">
-                                  SmartClear Decision
-                                </p>
-                                <span
-                                  className={`mt-1 inline-flex rounded-full px-3 py-1.5 text-xs font-black ${financialDecisionClass(
-                                    item.financial_decision
-                                  )}`}
-                                >
-                                  {item.financial_decision}
-                                </span>
-                              </div>
-                            )}
-
-                            {item.payment_due_date && (
-                              <p className="mt-2 text-sm text-slate-500">
-                                Due: {new Date(
-                                  `${item.payment_due_date}T00:00:00`
-                                ).toLocaleDateString(
-                                  "en-PH",
-                                  {
-                                    month: "short",
-                                    day: "numeric",
-                                    year: "numeric",
-                                  }
-                                )}
-                              </p>
-                            )}
-                          </td>
-
-                          <td className="px-6 py-5">
-                            <span
-                              className={`inline-flex rounded-full px-3 py-1.5 text-xs font-black ${statusClass(
-                                item.status
-                              )}`}
-                            >
-                              {item.status}
-                            </span>
-
-                            <p className="mt-2 text-sm text-slate-500">
-                              {item.financial_reviewed_at
-                                ? formatDate(
-                                    item.financial_reviewed_at
-                                  )
-                                : "Not reviewed yet"}
-                            </p>
-                          </td>
-
-                          <td className="px-6 py-5 text-right">
-                            <div className="flex flex-wrap items-center justify-end gap-2">
-                              {item.paymentRecord &&
-                                Number(item.paymentRecord.balance || 0) > 0 && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedPaymentStep(item);
-                                        setShowUpdatePayment(true);
-                                      }}
-                                      className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100"
-                                    >
-                                      <FaMoneyBillWave />
-                                      Update Payment
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedPaymentStep(item);
-                                        setShowPaymentHistory(true);
-                                      }}
-                                      className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-100"
-                                    >
-                                      <FaHistory />
-                                      History
-                                    </button>
-                                  </>
-                                )}
-
-                              <button
-                                type="button"
-                                disabled={
-                                  reviewingStepId === item.id
-                                }
-                                onClick={() =>
-                                  openFinancialReview(
-                                    item,
-                                    item.financial_decision ||
-                                      (item.status ===
-                                      "Rejected"
-                                        ? "Not Cleared"
-                                        : "Fully Paid")
-                                  )
-                                }
-                                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-slate-900 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                <FaMoneyBillWave />
-                                {item.status === "Pending"
-                                  ? "Review"
-                                  : "Update Record"}
-                              </button>
-                            </div>
-                          </td>
-                        </motion.tr>
-                      )
-                    )
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="space-y-4 p-4 lg:hidden">
-              {filteredFinancialSteps.length === 0 ? (
-                <div className="rounded-2xl bg-slate-50 p-10 text-center">
-                  <FaMoneyBillWave className="mx-auto text-4xl text-slate-300" />
-                  <p className="mt-4 font-bold text-slate-700">
-                    No financial records found
-                  </p>
-                </div>
-              ) : (
-                filteredFinancialSteps.map(
-                  (item, index) => (
-                    <motion.article
-                      key={item.id}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{
-                        duration: 0.22,
-                        delay: Math.min(
-                          index * 0.035,
-                          0.2
-                        ),
-                      }}
-                      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h3 className="text-lg font-black text-slate-900">
-                            {item.student?.full_name ||
-                              "No Name"}
-                          </h3>
-                          <p className="mt-1 text-sm text-slate-500">
-                            {item.student?.student_id ||
-                              "No Student ID"}
-                          </p>
-                        </div>
-
-                        <span
-                          className={`rounded-full px-3 py-1.5 text-xs font-black ${statusClass(
-                            item.status
-                          )}`}
-                        >
-                          {item.status}
-                        </span>
-                      </div>
-
-                      <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-4 text-sm">
-                        <div>
-                          <p className="text-xs font-bold uppercase text-slate-400">
-                            Class
-                          </p>
-                          <p className="mt-1 font-bold text-slate-700">
-                            {item.courseCode} · {item.yearLevel}
-                          </p>
-                          <p className="mt-1 text-slate-500">
-                            {formatBlockLabel(
-                              item.blockCode
-                            )}
-                          </p>
-                        </div>
-
-                        <div>
-                          <p className="text-xs font-bold uppercase text-slate-400">
-                            Cycle
-                          </p>
-                          <p className="mt-1 font-bold text-slate-700">
-                            {item.semester || "N/A"}
-                          </p>
-                          <p className="mt-1 text-slate-500">
-                            {item.schoolYear || "N/A"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">
-                          Imported Payment Record
-                        </p>
-
-                        {item.paymentRecord ? (
-                          <>
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <span
-                                className={`rounded-full px-3 py-1.5 text-xs font-black ${paymentStatusClass(
-                                  item.paymentRecord.payment_status
-                                )}`}
-                              >
-                                {item.paymentRecord.payment_status}
-                              </span>
-
-                              <span className="text-sm font-black text-slate-700">
-                                {formatCurrency(
-                                  item.paymentRecord.balance
-                                )}
-                              </span>
-                            </div>
-
-                            <p className="mt-2 text-xs text-slate-500">
-                              Paid {formatCurrency(
-                                item.paymentRecord.amount_paid
-                              )} of {formatCurrency(
-                                item.paymentRecord.amount_due
-                              )}
-                            </p>
-                          </>
-                        ) : (
-                          <p className="mt-2 text-sm font-semibold text-slate-500">
-                            No matching payment record imported yet.
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="mt-5 grid gap-2">
-                        {item.paymentRecord &&
-                          Number(item.paymentRecord.balance || 0) > 0 && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedPaymentStep(item);
-                                  setShowUpdatePayment(true);
-                                }}
-                                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-bold text-emerald-700 transition hover:bg-emerald-100"
-                              >
-                                <FaMoneyBillWave />
-                                Update Payment
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedPaymentStep(item);
-                                  setShowPaymentHistory(true);
-                                }}
-                                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 font-bold text-blue-700 transition hover:bg-blue-100"
-                              >
-                                <FaHistory />
-                                Payment History
-                              </button>
-                            </>
-                          )}
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openFinancialReview(
-                              item,
-                              item.financial_decision ||
-                                (item.status === "Rejected"
-                                  ? "Not Cleared"
-                                  : "Fully Paid")
-                            )
-                          }
-                          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 font-bold text-white transition hover:bg-emerald-700"
-                        >
-                          <FaMoneyBillWave />
-                          {item.status === "Pending"
-                            ? "Open Financial Review"
-                            : "Update Financial Record"}
-                        </button>
-                      </div>
-                    </motion.article>
-                  )
-                )
-              )}
-            </div>
-          </motion.section>
-        </div>
-      ) : (
         <>
       {/* Header */}
 
@@ -7154,36 +5631,24 @@ if (stepIds.length > 0) {
                               </button>
 
                               {item.status === "Pending" ? (
-                                item.isFinancialOffice ? (
+                                <div className="mt-2 grid grid-cols-2 gap-2">
                                   <button
                                     type="button"
                                     disabled={!canReview || isReviewing}
-                                    onClick={() => openFinancialReview(item)}
-                                    className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:opacity-40"
+                                    onClick={() => approveStep(item)}
+                                    className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:opacity-40"
                                   >
-                                    <FaMoneyBillWave />
-                                    Financial Review
+                                    Approve
                                   </button>
-                                ) : (
-                                  <div className="mt-2 grid grid-cols-2 gap-2">
-                                    <button
-                                      type="button"
-                                      disabled={!canReview || isReviewing}
-                                      onClick={() => approveStep(item)}
-                                      className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:opacity-40"
-                                    >
-                                      Approve
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={!canReview || isReviewing}
-                                      onClick={() => rejectStep(item)}
-                                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 transition hover:bg-rose-100 disabled:opacity-40"
-                                    >
-                                      Reject
-                                    </button>
-                                  </div>
-                                )
+                                  <button
+                                    type="button"
+                                    disabled={!canReview || isReviewing}
+                                    onClick={() => rejectStep(item)}
+                                    className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 transition hover:bg-rose-100 disabled:opacity-40"
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
                               ) : (
                                 <p className="mt-3 text-sm font-semibold text-slate-500">
                                   Reviewed {formatDate(item.reviewed_at)}
@@ -7267,8 +5732,6 @@ if (stepIds.length > 0) {
                                         {item.submission ? <FaFileAlt /> : <FaEye />}
                                         {item.submission
                                           ? "Open submission"
-                                          : item.isFinancialOffice
-                                          ? "Financial record"
                                           : item.targetType === "Subject"
                                           ? "Faculty review"
                                           : "Office review"}
@@ -7277,8 +5740,6 @@ if (stepIds.length > 0) {
                                       <p className="mt-1.5 max-w-[220px] text-sm leading-4 text-slate-400">
                                         {item.submission
                                           ? "Student requirement received."
-                                          : item.isFinancialOffice
-                                          ? "No student upload required."
                                           : item.targetType === "Subject"
                                           ? selectedRequirement?.is_active &&
                                             requirementNeedsSubmission(selectedRequirement)
@@ -7297,11 +5758,6 @@ if (stepIds.length > 0) {
                                         {item.status}
                                       </span>
 
-                                      {item.financial_decision && (
-                                        <p className="mt-2 text-xs font-semibold text-emerald-700">
-                                          {item.financial_decision}
-                                        </p>
-                                      )}
 
                                       {item.remarks && (
                                         <p className="mt-1.5 max-w-[220px] line-clamp-2 text-sm leading-4 text-slate-500">
@@ -7311,51 +5767,37 @@ if (stepIds.length > 0) {
                                     </td>
 
                                     <td className="px-4 py-4 text-sm leading-6 text-slate-500">
-                                      {item.isFinancialOffice
-                                        ? item.financial_reviewed_at
-                                          ? formatDate(item.financial_reviewed_at)
-                                          : "Financial review required"
-                                        : item.targetType === "Subject" && !item.submission
+                                      {item.targetType === "Subject" && !item.submission
                                         ? selectedRequirement?.is_active &&
                                           requirementNeedsSubmission(selectedRequirement)
                                           ? "Not submitted"
                                           : "Submission not required"
-                                        : formatDate(item.submission?.submitted_at)}
+                                        : item.submission?.submitted_at
+                                        ? formatDate(item.submission.submitted_at)
+                                        : "Direct office review"}
                                     </td>
 
                                     <td className="px-4 py-4 text-right">
                                       {item.status === "Pending" ? (
-                                        item.isFinancialOffice ? (
+                                        <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
                                           <button
                                             type="button"
                                             disabled={!canReview || isReviewing}
-                                            onClick={() => openFinancialReview(item)}
-                                            className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40"
+                                            onClick={() => approveStep(item)}
+                                            className="px-4 py-2.5 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
                                           >
-                                            <FaMoneyBillWave />
-                                            Review
+                                            Approve
                                           </button>
-                                        ) : (
-                                          <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-                                            <button
-                                              type="button"
-                                              disabled={!canReview || isReviewing}
-                                              onClick={() => approveStep(item)}
-                                              className="px-4 py-2.5 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
-                                            >
-                                              Approve
-                                            </button>
 
-                                            <button
-                                              type="button"
-                                              disabled={!canReview || isReviewing}
-                                              onClick={() => rejectStep(item)}
-                                              className="border-l border-slate-200 px-4 py-2.5 text-sm font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
-                                            >
-                                              Reject
-                                            </button>
-                                          </div>
-                                        )
+                                          <button
+                                            type="button"
+                                            disabled={!canReview || isReviewing}
+                                            onClick={() => rejectStep(item)}
+                                            className="border-l border-slate-200 px-4 py-2.5 text-sm font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                          >
+                                            Reject
+                                          </button>
+                                        </div>
                                       ) : (
                                         <p className="text-sm font-semibold text-slate-500">
                                           {formatDate(item.reviewed_at)}
@@ -7378,466 +5820,6 @@ if (stepIds.length > 0) {
         </div>
       </motion.section>
         </>
-      )}
-
-      {/* Treasurer Payment Records Import */}
-
-      {showPaymentImport && (
-        <PaymentRecordsImport
-          onClose={() =>
-            setShowPaymentImport(false)
-          }
-          onImported={async () => {
-            setShowPaymentImport(false);
-            await loadDashboard();
-          }}
-        />
-      )}
-
-      {showUpdatePayment &&
-        selectedPaymentStep?.paymentRecord && (
-          <UpdatePaymentModal
-            studentName={
-              selectedPaymentStep.student?.full_name ||
-              "Student"
-            }
-            studentNumber={
-              selectedPaymentStep.student?.student_id ||
-              ""
-            }
-            paymentRecord={
-              selectedPaymentStep.paymentRecord
-            }
-            onClose={() => {
-              setShowUpdatePayment(false);
-              setSelectedPaymentStep(null);
-            }}
-            onUpdated={async () => {
-              await loadDashboard();
-            }}
-          />
-        )}
-
-      {showPaymentHistory &&
-        selectedPaymentStep?.paymentRecord && (
-          <PaymentHistoryModal
-            studentName={
-              selectedPaymentStep.student?.full_name ||
-              "Student"
-            }
-            studentNumber={
-              selectedPaymentStep.student?.student_id ||
-              ""
-            }
-            paymentRecord={
-              selectedPaymentStep.paymentRecord
-            }
-            onClose={() => {
-              setShowPaymentHistory(false);
-              setSelectedPaymentStep(null);
-            }}
-          />
-        )}
-
-      {/* Treasurer / Cashier Financial Review Modal */}
-
-      {showFinancialModal &&
-        selectedFinancialStep && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-sm">
-            <div className="max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-              <div className="bg-gradient-to-r from-emerald-700 to-teal-700 p-6 text-white">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-2xl">
-                      <FaMoneyBillWave />
-                    </div>
-
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.15em] text-emerald-100">
-                        Treasurer / Cashier
-                      </p>
-
-                      <h2 className="mt-1 text-2xl font-black">
-                        Financial Clearance Review
-                      </h2>
-
-                      <p className="mt-2 text-sm text-emerald-100">
-                        {selectedFinancialStep.student
-                          ?.full_name || "Student"}
-                        {" — "}
-                        {selectedFinancialStep.student
-                          ?.student_id || "No Student ID"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={
-                      closeFinancialReview
-                    }
-                    disabled={
-                      savingFinancialDecision
-                    }
-                    className="rounded-xl bg-white/15 p-3 transition hover:bg-white/25 disabled:opacity-50"
-                    aria-label="Close financial review"
-                  >
-                    <FaTimesCircle />
-                  </button>
-                </div>
-              </div>
-
-              <form
-                onSubmit={
-                  submitFinancialReview
-                }
-                className="space-y-6 p-6"
-              >
-                <div className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-5 md:grid-cols-3">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                      Course / Block
-                    </p>
-                    <p className="mt-1 font-bold text-slate-800">
-                      {selectedFinancialStep.courseCode}
-                      {" — "}
-                      {selectedFinancialStep.blockCode}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                      Semester
-                    </p>
-                    <p className="mt-1 font-bold text-slate-800">
-                      {selectedFinancialStep.semester}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                      School Year
-                    </p>
-                    <p className="mt-1 font-bold text-slate-800">
-                      {selectedFinancialStep.schoolYear}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">
-                        Imported Treasurer Record
-                      </p>
-                      <h3 className="mt-1 text-lg font-black text-slate-900">
-                        Accounting Verification
-                      </h3>
-                    </div>
-
-                    {selectedFinancialStep.paymentRecord ? (
-                      <span
-                        className={`w-fit rounded-full px-3 py-1.5 text-xs font-black ${paymentStatusClass(
-                          selectedFinancialStep.paymentRecord.payment_status
-                        )}`}
-                      >
-                        {selectedFinancialStep.paymentRecord.payment_status}
-                      </span>
-                    ) : (
-                      <span className="w-fit rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-600">
-                        No Imported Record
-                      </span>
-                    )}
-                  </div>
-
-                  {selectedFinancialStep.paymentRecord ? (
-                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-xl bg-slate-50 p-4">
-                        <p className="text-xs font-bold uppercase text-slate-400">
-                          Amount Due
-                        </p>
-                        <p className="mt-1 font-black text-slate-800">
-                          {formatCurrency(
-                            selectedFinancialStep.paymentRecord.amount_due
-                          )}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl bg-slate-50 p-4">
-                        <p className="text-xs font-bold uppercase text-slate-400">
-                          Amount Paid
-                        </p>
-                        <p className="mt-1 font-black text-slate-800">
-                          {formatCurrency(
-                            selectedFinancialStep.paymentRecord.amount_paid
-                          )}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl bg-slate-50 p-4">
-                        <p className="text-xs font-bold uppercase text-slate-400">
-                          Balance
-                        </p>
-                        <p className={`mt-1 font-black ${
-                          Number(selectedFinancialStep.paymentRecord.balance) > 0
-                            ? "text-amber-700"
-                            : "text-emerald-700"
-                        }`}>
-                          {formatCurrency(
-                            selectedFinancialStep.paymentRecord.balance
-                          )}
-                        </p>
-                      </div>
-
-                      {selectedFinancialStep.paymentRecord.reference_number && (
-                        <div className="sm:col-span-3">
-                          <p className="text-xs font-bold uppercase text-slate-400">
-                            Reference Number
-                          </p>
-                          <p className="mt-1 font-semibold text-slate-700">
-                            {selectedFinancialStep.paymentRecord.reference_number}
-                          </p>
-                        </div>
-                      )}
-
-                      {selectedFinancialStep.paymentRecord.remarks && (
-                        <div className="sm:col-span-3">
-                          <p className="text-xs font-bold uppercase text-slate-400">
-                            Imported Remarks
-                          </p>
-                          <p className="mt-1 text-sm leading-6 text-slate-600">
-                            {selectedFinancialStep.paymentRecord.remarks}
-                          </p>
-                        </div>
-                      )}
-
-                      <div className="sm:col-span-3">
-                        <p className="text-xs text-slate-400">
-                          Last synced {formatDate(
-                            selectedFinancialStep.paymentRecord.updated_at ||
-                              selectedFinancialStep.paymentRecord.imported_at
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5">
-                      <p className="font-bold text-slate-700">
-                        No matching payment record found.
-                      </p>
-                      <p className="mt-1 text-sm leading-6 text-slate-500">
-                        The Treasurer can still review manually, but importing the current spreadsheet will allow SmartClear to show the student's balance here automatically.
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="mb-2 block font-bold text-slate-700">
-                    Financial Decision
-                  </label>
-
-                  <select
-                    name="decision"
-                    value={
-                      financialForm.decision
-                    }
-                    onChange={
-                      handleFinancialFormChange
-                    }
-                    disabled={
-                      savingFinancialDecision
-                    }
-                    className="w-full rounded-xl border border-slate-200 bg-white p-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100"
-                  >
-                    <option value="Fully Paid">
-                      Fully Paid
-                    </option>
-                    <option value="Payment Agreement">
-                      Approved with Payment Agreement
-                    </option>
-                    <option value="Deferred Payment">
-                      Approved with Deferred Payment
-                    </option>
-                    <option value="Not Cleared">
-                      Not Cleared
-                    </option>
-                  </select>
-                </div>
-
-                <div className="grid gap-5 md:grid-cols-2">
-                  <div>
-                    <label className="mb-2 block font-bold text-slate-700">
-                      Remaining Balance
-                    </label>
-
-                    <div className="relative">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-400">
-                        ₱
-                      </span>
-
-                      <input
-                        type="number"
-                        name="remainingBalance"
-                        min="0"
-                        step="0.01"
-                        value={
-                          financialForm.remainingBalance
-                        }
-                        onChange={
-                          handleFinancialFormChange
-                        }
-                        disabled={
-                          savingFinancialDecision ||
-                          financialForm.decision ===
-                            "Fully Paid"
-                        }
-                        placeholder="0.00"
-                        className="w-full rounded-xl border border-slate-200 py-3 pl-9 pr-4 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block font-bold text-slate-700">
-                      Agreed Payment Date
-                    </label>
-
-                    <input
-                      type="date"
-                      name="paymentDueDate"
-                      value={
-                        financialForm.paymentDueDate
-                      }
-                      onChange={
-                        handleFinancialFormChange
-                      }
-                      disabled={
-                        savingFinancialDecision ||
-                        ![
-                          "Payment Agreement",
-                          "Deferred Payment",
-                        ].includes(
-                          financialForm.decision
-                        )
-                      }
-                      className="w-full rounded-xl border border-slate-200 bg-white p-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100"
-                    />
-                  </div>
-                </div>
-
-                {[
-                  "Payment Agreement",
-                  "Deferred Payment",
-                ].includes(
-                  financialForm.decision
-                ) && (
-                  <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-5">
-                    <input
-                      type="checkbox"
-                      name="consentConfirmed"
-                      checked={
-                        financialForm.consentConfirmed
-                      }
-                      onChange={
-                        handleFinancialFormChange
-                      }
-                      disabled={
-                        savingFinancialDecision
-                      }
-                      className="mt-1 h-5 w-5 accent-emerald-700"
-                    />
-
-                    <div>
-                      <p className="font-bold text-amber-900">
-                        Student/Parent Consent Confirmed
-                      </p>
-                      <p className="mt-1 text-sm leading-6 text-amber-800">
-                        Confirm that the student or parent accepted the remaining balance and agreed payment date.
-                      </p>
-                    </div>
-                  </label>
-                )}
-
-                <div>
-                  <label className="mb-2 block font-bold text-slate-700">
-                    Remarks / Agreement Details
-                  </label>
-
-                  <textarea
-                    name="remarks"
-                    rows="4"
-                    value={
-                      financialForm.remarks
-                    }
-                    onChange={
-                      handleFinancialFormChange
-                    }
-                    disabled={
-                      savingFinancialDecision
-                    }
-                    placeholder={
-                      financialForm.decision ===
-                      "Not Cleared"
-                        ? "Explain the unpaid obligation and what the student must settle."
-                        : financialForm.decision ===
-                          "Fully Paid"
-                        ? "Optional receipt, OR number, or confirmation note."
-                        : "Record the payment agreement, who gave consent, and any important conditions."
-                    }
-                    className="w-full resize-none rounded-xl border border-slate-200 p-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-100"
-                  />
-                </div>
-
-                <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5 text-sm leading-6 text-blue-800">
-                  <strong>Important:</strong>{" "}
-                  Fully Paid, Payment Agreement, and Deferred Payment approve the Accounting clearance step. Not Cleared rejects the step and prevents the student&apos;s clearance from becoming completed.
-                </div>
-
-                <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
-                  <button
-                    type="button"
-                    onClick={
-                      closeFinancialReview
-                    }
-                    disabled={
-                      savingFinancialDecision
-                    }
-                    className="rounded-xl border border-slate-200 px-6 py-3 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
-                  >
-                    Cancel
-                  </button>
-
-                  <button
-                    type="submit"
-                    disabled={
-                      savingFinancialDecision
-                    }
-                    className={`inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 font-bold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                      financialForm.decision ===
-                      "Not Cleared"
-                        ? "bg-red-600 hover:bg-red-700"
-                        : "bg-emerald-700 hover:bg-emerald-800"
-                    }`}
-                  >
-                    {savingFinancialDecision ? (
-                      <>
-                        <FaSyncAlt className="animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <FaSave />
-                        Save Financial Decision
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
       {/* Manage Subject Requirement Modal */}
 
       {showRequirementModal &&
@@ -8248,8 +6230,6 @@ if (stepIds.length > 0) {
                           ? "Faculty Review — No Submission Required"
                           : "No Requirement Set"
 
-                        : selectedSubmission.isFinancialOffice
-                        ? "Financial Clearance Review"
                         : "Direct Office Verification"}
 
                     </p>
@@ -8270,8 +6250,6 @@ if (stepIds.length > 0) {
                           ? "This requirement is verified directly by the assigned teacher and does not need a student upload."
                           : "No active requirement is set. The teacher may still approve after confirming the warning."
 
-                        : selectedSubmission.isFinancialOffice
-                        ? "The Treasurer / Cashier checks the official financial record directly. A student upload is not required for this office step."
                         : "No student upload is required for direct office verification. You may approve or reject this exact office clearance step."}
 
                     </p>
@@ -8296,8 +6274,6 @@ if (stepIds.length > 0) {
                         ? "The student has not provided a written submission for this subject requirement."
                         : "No student message is required. Review the student's subject obligations directly."
 
-                      : selectedSubmission.isFinancialOffice
-                      ? "No student submission is required. Use the Financial Review form to record the office's decision."
                       : "No student message was submitted. The assigned office approver may still verify this clearance directly.")}
 
                 </p>
@@ -8342,8 +6318,6 @@ if (stepIds.length > 0) {
                         ? "The student has not uploaded an attachment for this subject requirement."
                         : "No attachment is required for this subject clearance."
 
-                      : selectedSubmission.isFinancialOffice
-                      ? "No student attachment is required for financial clearance review."
                       : "No attachment was uploaded. Direct office verification is still allowed."}
 
                   </p>
@@ -8405,33 +6379,8 @@ if (stepIds.length > 0) {
                 </div>
               </div>
 
-              {selectedSubmission.status ===
-
-                "Pending" &&
-                (selectedSubmission.isFinancialOffice ? (
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const item =
-                        selectedSubmission;
-
-                      setSelectedSubmission(
-                        null
-                      );
-
-
-                      openFinancialReview(
-                        item
-                      );
-                    }}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-5 py-3 font-semibold text-white transition hover:bg-emerald-800"
-                  >
-                    <FaMoneyBillWave />
-                    Open Financial Review
-                  </button>
-                ) : (
-                  <div className="flex flex-col gap-3 sm:flex-row">
+              {selectedSubmission.status === "Pending" && (
+                <div className="flex flex-col gap-3 sm:flex-row">
                     <button
                       type="button"
                       onClick={() => {
@@ -8472,7 +6421,7 @@ if (stepIds.length > 0) {
                         : "Reject Office Clearance"}
                     </button>
                   </div>
-                ))}
+              )}
 
             </div>
           </div>

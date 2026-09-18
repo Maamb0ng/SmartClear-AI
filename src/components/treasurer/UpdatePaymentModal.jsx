@@ -30,6 +30,78 @@ const cleanNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+
+const createTreasurerPaymentNotification = async ({
+  studentName,
+  studentNumber,
+  paymentAmount,
+  remainingBalance,
+  paymentRecord,
+}) => {
+  try {
+    const {
+      data: { user: authUser },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !authUser) {
+      return;
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("auth_id", authUser.id)
+      .single();
+
+    if (profileError || !profile?.id) {
+      return;
+    }
+
+    const paymentStatus =
+      Number(remainingBalance || 0) <= 0 ? "Cleared" : "With Balance";
+
+    const { error: notificationError } = await supabase
+      .from("notifications")
+      .insert({
+        user_id: profile.id,
+        title: "Payment Recorded",
+        message: `${studentName || "Student"}${
+          studentNumber ? ` (${studentNumber})` : ""
+        } paid ${money(paymentAmount)}. Remaining balance: ${money(
+          remainingBalance
+        )}.`,
+        type: "Success",
+        entity_type: "payment_record",
+        entity_id: paymentRecord?.id || null,
+        is_read: false,
+        metadata: {
+          category: "treasurer",
+          module: "payment",
+          action: "payment_recorded",
+          student_id: paymentRecord?.student_id || null,
+          student_name: studentName || null,
+          student_number: studentNumber || null,
+          payment_record_id: paymentRecord?.id || null,
+          school_year: paymentRecord?.school_year || null,
+          semester: paymentRecord?.semester || null,
+          payment_amount: Number(paymentAmount || 0),
+          remaining_balance: Number(remainingBalance || 0),
+          payment_status: paymentStatus,
+        },
+      });
+
+    if (notificationError) {
+      console.warn(
+        "Treasurer payment notification was not created:",
+        notificationError
+      );
+    }
+  } catch (error) {
+    console.warn("Treasurer payment notification error:", error);
+  }
+};
+
 function UpdatePaymentModal({
   studentName = "Student",
   studentNumber = "",
@@ -158,19 +230,33 @@ function UpdatePaymentModal({
 
       if (error) throw error;
 
+      const savedPaymentAmount =
+        data?.paymentAmount ?? enteredAmount;
+
+      const savedRemainingBalance =
+        data?.balance ?? projectedBalance;
+
+      await createTreasurerPaymentNotification({
+        studentName,
+        studentNumber,
+        paymentAmount: savedPaymentAmount,
+        remainingBalance: savedRemainingBalance,
+        paymentRecord,
+      });
+
       await Swal.fire({
         icon: "success",
         title: "Payment Recorded",
         html: `
           <div style="text-align:left;line-height:1.7">
             <div><strong>Payment:</strong> ${money(
-              data?.paymentAmount ?? enteredAmount
+              savedPaymentAmount
             )}</div>
             <div><strong>Total paid:</strong> ${money(
               data?.amountPaid ?? amountPaid + enteredAmount
             )}</div>
             <div><strong>Remaining balance:</strong> ${money(
-              data?.balance ?? projectedBalance
+              savedRemainingBalance
             )}</div>
           </div>
         `,
@@ -347,14 +433,15 @@ function UpdatePaymentModal({
                   className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"
                 >
                   <FaReceipt className="text-slate-400" />
-                  Reference / OR Number
+                  OR / Payment Reference
+                  <span className="font-normal text-slate-400">(optional)</span>
                 </label>
                 <input
                   id="payment-reference"
                   type="text"
                   value={referenceNumber}
                   onChange={(event) => setReferenceNumber(event.target.value)}
-                  placeholder="Example: OR-2026-00125"
+                  placeholder="Example: OR-2026-00125 or transaction reference"
                   maxLength={120}
                   className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100"
                 />

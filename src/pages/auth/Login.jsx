@@ -24,6 +24,7 @@ import Button from "../../components/common/Button";
 import Input from "../../components/common/Input";
 
 import { loginUser } from "../../services/authService";
+import { supabase } from "../../services/supabase";
 
 import campusImage from "../../assets/cctc-campus.png";
 import schoolLogo from "../../assets/cctc-logo.jpg";
@@ -151,8 +152,41 @@ function Login() {
       if (profile.role === "Student") {
         navigate("/student/dashboard", { replace: true });
       } else if (profile.role === "Approver") {
-        navigate("/approver/dashboard", { replace: true });
-      } else if (profile.role === "Administrator") {
+        const { data: financialAssignment, error: financialAssignmentError } =
+          await supabase
+            .from("approver_assignments")
+            .select(`
+              id,
+              offices!inner (
+                id,
+                office_code,
+                office_name,
+                is_active
+              )
+            `)
+            .eq("approver_id", profile.id)
+            .eq("is_active", true)
+            .eq("offices.is_active", true)
+            .eq("offices.office_code", "FIN")
+            .limit(1)
+            .maybeSingle();
+
+        if (financialAssignmentError) {
+          console.error(
+            "Unable to verify Treasurer assignment:",
+            financialAssignmentError
+          );
+        }
+
+        if (financialAssignment) {
+          navigate("/treasurer/dashboard", { replace: true });
+        } else {
+          navigate("/approver/dashboard", { replace: true });
+        }
+      } else if (
+        profile.role === "Administrator" ||
+        profile.role === "Admin"
+      ) {
         navigate("/admin/dashboard", { replace: true });
       } else {
         navigate("/", { replace: true });

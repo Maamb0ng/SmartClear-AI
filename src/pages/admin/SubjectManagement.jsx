@@ -29,8 +29,7 @@ import {
 } from "../../services/subjectService";
 
 import { getOffices } from "../../services/officeService";
-
-const PROGRAM_OPTIONS = ["BSIT", "BSCS", "BSED", "BSBA"];
+import { getCoursesWithSections } from "../../services/courseService";
 
 const YEAR_LEVELS = [
   { value: 1, label: "1st Year" },
@@ -59,6 +58,7 @@ const DEFAULT_FORM = {
 function SubjectManagement() {
   const [subjects, setSubjects] = useState([]);
   const [offices, setOffices] = useState([]);
+  const [courses, setCourses] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -99,6 +99,20 @@ function SubjectManagement() {
     }
   };
 
+  const loadCourses = async () => {
+    try {
+      const data = await getCoursesWithSections();
+      setCourses(data || []);
+    } catch (error) {
+      console.error("Load courses error:", error);
+      Swal.fire({
+        icon: "error",
+        title: "Unable to Load Courses",
+        text: error?.message || "An unexpected error occurred while loading courses.",
+      });
+    }
+  };
+
   const loadOffices = async () => {
     try {
       const data = await getOffices();
@@ -111,17 +125,37 @@ function SubjectManagement() {
   useEffect(() => {
     loadSubjects();
     loadOffices();
+    loadCourses();
   }, []);
 
   const availablePrograms = useMemo(() => {
-    const programsFromSubjects = subjects
-      .map((subject) => subject.program)
-      .filter(Boolean);
+    return courses
+      .filter((course) => course.is_active !== false)
+      .map((course) => String(course.course_code || "").trim().toUpperCase())
+      .filter(Boolean)
+      .sort((first, second) =>
+        first.localeCompare(second, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        })
+      );
+  }, [courses]);
 
-    return Array.from(
-      new Set([...PROGRAM_OPTIONS, ...programsFromSubjects])
-    );
-  }, [subjects]);
+  useEffect(() => {
+    if (availablePrograms.length === 0) return;
+
+    if (!availablePrograms.includes(selectedProgram)) {
+      const preferredProgram = availablePrograms.includes("BSIT")
+        ? "BSIT"
+        : availablePrograms[0];
+
+      setSelectedProgram(preferredProgram);
+      setFormData((previousData) => ({
+        ...previousData,
+        program: preferredProgram,
+      }));
+    }
+  }, [availablePrograms, selectedProgram]);
 
   const filteredSubjects = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -192,6 +226,15 @@ function SubjectManagement() {
     ).length;
 
   const openAddModal = () => {
+    if (availablePrograms.length === 0) {
+      Swal.fire({
+        icon: "warning",
+        title: "No Active Courses",
+        text: "Create or activate a course in Course Management before adding a subject.",
+      });
+      return;
+    }
+
     setEditingSubject(null);
 
     setFormData({

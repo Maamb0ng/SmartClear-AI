@@ -435,38 +435,93 @@ export async function registerUser(formData) {
 
   /*
   =====================================
-  WAIT FOR EMAIL CONFIRMATION
+  TEMPORARY TESTING MODE
   =====================================
 
-  Do not insert into public.users here.
+  Email confirmation is temporarily disabled
+  while SmartClear AI is undergoing functional
+  testing.
 
-  The database trigger in
-  enforce_verified_email_registration.sql
-  creates the Pending public profile only
-  after auth.users.email_confirmed_at is set.
-  This prevents unverified or unreachable
-  email addresses from appearing as valid
-  pending registrations.
+  The existing database registration trigger
+  remains responsible for creating the Pending
+  public.users profile and the student's
+  irregular-subject request records from the
+  auth metadata above.
+
+  IMPORTANT:
+  Restore the verified-email registration flow
+  before final deployment.
   */
 
   if (data.session) {
-    /*
-    A session during sign-up means Supabase
-    Confirm Email is disabled. Sign out and
-    reject the registration immediately.
-    */
-
     await supabase.auth.signOut();
+  }
 
+  /*
+  Give the database trigger a short moment to
+  finish creating the public profile.
+
+  This also prevents the registration page from
+  showing a false success message when only the
+  Supabase Authentication account was created.
+  */
+
+  let createdProfile = null;
+  let profileError = null;
+
+  for (
+    let attempt = 0;
+    attempt < 5;
+    attempt += 1
+  ) {
+    const {
+      data: profile,
+      error,
+    } = await supabase
+      .from("users")
+      .select(
+        "id, auth_id, email, role, status, student_id, employee_id, student_type"
+      )
+      .eq(
+        "auth_id",
+        data.user.id
+      )
+      .maybeSingle();
+
+    if (error) {
+      profileError = error;
+      break;
+    }
+
+    if (profile) {
+      createdProfile = profile;
+      break;
+    }
+
+    await new Promise(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          400
+        )
+    );
+  }
+
+  if (profileError) {
+    throw profileError;
+  }
+
+  if (!createdProfile) {
     throw new Error(
-      "Registration is temporarily unavailable because email confirmation is disabled in Supabase. Enable Confirm Email before accepting registrations."
+      "The authentication account was created, but the SmartClear user profile was not created. Check the registration database trigger before trying again."
     );
   }
 
   return {
     ...data.user,
+    profile: createdProfile,
     requires_email_confirmation:
-      true,
+      false,
   };
 }
 
@@ -630,7 +685,10 @@ export async function getCurrentUser() {
   } = await supabase
     .from("users")
     .select("*")
-    .eq("auth_id", user.id)
+    .eq(
+      "auth_id",
+      user.id
+    )
     .single();
 
   if (error) {

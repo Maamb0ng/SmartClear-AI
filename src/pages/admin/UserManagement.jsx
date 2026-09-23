@@ -479,15 +479,29 @@ function UserManagement() {
   }
 
   const getStudentIrregularAssignments = (
-    studentId
-  ) =>
-    irregularAssignments.filter(
+    studentOrId
+  ) => {
+    const candidates =
+      typeof studentOrId === "object" && studentOrId !== null
+        ? [studentOrId.id, studentOrId.student_id]
+        : [studentOrId];
+
+    const normalizedCandidates = candidates
+      .filter(
+        (value) =>
+          value !== null &&
+          value !== undefined &&
+          String(value).trim() !== ""
+      )
+      .map((value) => String(value));
+
+    return irregularAssignments.filter(
       (assignment) =>
-        String(
-          assignment.student_id
-        ) ===
-        String(studentId)
+        normalizedCandidates.includes(
+          String(assignment.student_id)
+        )
     );
+  };
 
   const getSubjectById = (
     subjectId
@@ -533,21 +547,9 @@ function UserManagement() {
         String(
           offering.subject_id
         ) ===
-          String(
-            assignment.subject_id
-          ) &&
-        normalizeValue(
-          offering.school_year
-        ) ===
-          normalizeValue(
-            assignment.school_year
-          ) &&
-        normalizeValue(
-          offering.semester
-        ) ===
-          normalizeValue(
-            assignment.semester
-          )
+        String(
+          assignment.subject_id
+        )
     );
 
   const getOfferingLabel = (
@@ -580,7 +582,15 @@ function UserManagement() {
       approver?.full_name ||
       "Unassigned teacher";
 
-    return `${course} • ${yearLevel} • ${block} • ${teacher}`;
+    const schoolYear =
+      offering.school_year ||
+      "School year not set";
+
+    const semester =
+      offering.semester ||
+      "Semester not set";
+
+    return `${course} • ${yearLevel} • ${block} • ${teacher} • ${semester} • ${schoolYear}`;
   };
 
   function openIrregularSubjects(
@@ -588,7 +598,7 @@ function UserManagement() {
   ) {
     const assignments =
       getStudentIrregularAssignments(
-        user.id
+        user
       );
 
     const initialSelection = {};
@@ -1006,7 +1016,7 @@ function UserManagement() {
     ) {
       const assignments =
         getStudentIrregularAssignments(
-          user.id
+          user.student_id
         );
 
       const verifiedCount =
@@ -2310,7 +2320,7 @@ function UserManagement() {
                                       {(() => {
                                         const assignments =
                                           getStudentIrregularAssignments(
-                                            user.id
+                                            user.student_id
                                           );
 
                                         const approved =
@@ -2463,7 +2473,7 @@ function UserManagement() {
                                     <FaBookOpen />
 
                                     {getStudentIrregularAssignments(
-                                      user.id
+                                      user.student_id
                                     ).some(
                                       (
                                         assignment
@@ -2613,7 +2623,7 @@ function UserManagement() {
 
                 <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
                   {getStudentIrregularAssignments(
-                    selectedIrregularStudent.id
+                    selectedIrregularStudent.student_id
                   ).length ===
                   0 ? (
                     <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-8 text-center">
@@ -2630,7 +2640,7 @@ function UserManagement() {
                   ) : (
                     <div className="space-y-4">
                       {getStudentIrregularAssignments(
-                        selectedIrregularStudent.id
+                        selectedIrregularStudent.student_id
                       ).map(
                         (
                           assignment
@@ -2768,7 +2778,7 @@ function UserManagement() {
                                   {matchingOfferings.length ===
                                     0 && (
                                     <p className="mt-2 text-xs font-semibold text-rose-600">
-                                      No active class offering matches this subject, semester, and school year. Create one in Class Assignments first.
+                                      No active class offering is available for this subject. Create the correct class assignment first.
                                     </p>
                                   )}
 

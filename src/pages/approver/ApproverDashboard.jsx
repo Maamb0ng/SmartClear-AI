@@ -35,8 +35,10 @@ import {
   FaEye,
   FaEyeSlash,
   FaFileAlt,
+  FaDownload,
   FaGraduationCap,
   FaKey,
+  FaMoneyBillWave,
   FaPlus,
   FaSave,
   FaSearch,
@@ -47,6 +49,7 @@ import {
   FaTrash,
   FaUserGraduate,
   FaUsers,
+  FaHistory,
 } from "react-icons/fa";
 
 /*
@@ -86,6 +89,61 @@ const statusClass = (status) => {
     default:
       return "bg-slate-100 text-slate-700";
   }
+};
+
+const isFinancialOfficeName = (value) => {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  return [
+    "treasurer",
+    "accounting",
+    "cashier",
+    "finance",
+  ].some((keyword) =>
+    normalized.includes(keyword)
+  );
+};
+
+const formatCurrency = (value) => {
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount)) {
+    return "N/A";
+  }
+
+  return new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+  }).format(amount);
+};
+
+const financialDecisionClass = (decision) => {
+  switch (decision) {
+    case "Fully Paid":
+      return "bg-emerald-100 text-emerald-700";
+
+    case "Payment Agreement":
+      return "bg-amber-100 text-amber-700";
+
+    case "Deferred Payment":
+      return "bg-blue-100 text-blue-700";
+
+    case "Not Cleared":
+      return "bg-red-100 text-red-700";
+
+    default:
+      return "bg-slate-100 text-slate-600";
+  }
+};
+
+const DEFAULT_FINANCIAL_FORM = {
+  decision: "Fully Paid",
+  remainingBalance: "",
+  paymentDueDate: "",
+  consentConfirmed: false,
+  remarks: "",
 };
 
 const DEFAULT_REQUIREMENT_FORM = {
@@ -266,6 +324,33 @@ const formatBlockLabel = (value) => {
   return `Block ${blockCode}`;
 };
 
+const buildPaymentRecordKey = ({
+  studentId,
+  schoolYear,
+  semester,
+}) =>
+  [
+    String(studentId || "").trim(),
+    normalizeKeyPart(schoolYear),
+    normalizeKeyPart(semester),
+  ].join("|");
+
+const paymentStatusClass = (status) => {
+  switch (status) {
+    case "Cleared":
+      return "bg-emerald-100 text-emerald-700";
+
+    case "With Balance":
+      return "bg-amber-100 text-amber-700";
+
+    case "No Record":
+      return "bg-slate-100 text-slate-600";
+
+    default:
+      return "bg-slate-100 text-slate-600";
+  }
+};
+
 function ApproverDashboard() {
   const location =
     useLocation();
@@ -339,6 +424,21 @@ function ApproverDashboard() {
   const [isRegistrarVerifier, setIsRegistrarVerifier] =
     useState(false);
 
+  const [isFinancialApprover, setIsFinancialApprover] =
+    useState(false);
+
+  const [treasurerStatusFilter, setTreasurerStatusFilter] =
+    useState("All");
+
+  const [treasurerCourseFilter, setTreasurerCourseFilter] =
+    useState("All");
+
+  const [treasurerYearFilter, setTreasurerYearFilter] =
+    useState("All");
+
+  const [treasurerCycleFilter, setTreasurerCycleFilter] =
+    useState("All");
+
   const [clearanceReference, setClearanceReference] =
     useState("");
 
@@ -350,6 +450,30 @@ function ApproverDashboard() {
 
   const [verificationResult, setVerificationResult] =
     useState(null);
+
+  const [selectedFinancialStep, setSelectedFinancialStep] =
+    useState(null);
+
+  const [showFinancialModal, setShowFinancialModal] =
+    useState(false);
+
+  const [savingFinancialDecision, setSavingFinancialDecision] =
+    useState(false);
+
+  const [financialForm, setFinancialForm] =
+    useState(DEFAULT_FINANCIAL_FORM);
+
+  const [showPaymentImport, setShowPaymentImport] =
+    useState(false);
+
+  const [selectedPaymentStep, setSelectedPaymentStep] =
+    useState(null);
+
+  const [showUpdatePayment, setShowUpdatePayment] =
+    useState(false);
+
+  const [showPaymentHistory, setShowPaymentHistory] =
+    useState(false);
 
   const [reviewStatusFilter, setReviewStatusFilter] =
     useState("All");
@@ -515,6 +639,7 @@ function ApproverDashboard() {
         );
 
         setIsRegistrarVerifier(false);
+        setIsFinancialApprover(false);
       } else {
         const hasRegistrarAssignment = (
           officeAssignments || []
@@ -529,6 +654,17 @@ function ApproverDashboard() {
           hasRegistrarAssignment
         );
 
+        const hasFinancialAssignment = (
+          officeAssignments || []
+        ).some((assignment) =>
+          isFinancialOfficeName(
+            assignment.offices?.office_name
+          )
+        );
+
+        setIsFinancialApprover(
+          hasFinancialAssignment
+        );
       }
 
       /*
@@ -589,7 +725,14 @@ function ApproverDashboard() {
           approver_id,
           status,
           remarks,
-          reviewed_at
+          reviewed_at,
+          financial_decision,
+          remaining_balance,
+          payment_due_date,
+          consent_confirmed,
+          financial_notes,
+          financial_reviewed_at,
+          financial_reviewed_by
         `)
         .eq(
           "approver_id",
@@ -708,6 +851,50 @@ function ApproverDashboard() {
         if (error) throw error;
 
         students = data || [];
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | LOAD IMPORTED TREASURER PAYMENT RECORDS
+      |--------------------------------------------------------------------------
+      |
+      | payment_records is matched using the internal student UUID plus the
+      | exact school year and semester of the clearance request.
+      |--------------------------------------------------------------------------
+      */
+
+      let paymentRecords = [];
+
+      if (studentIds.length > 0) {
+        const {
+          data: paymentRows,
+          error: paymentRecordError,
+        } = await supabase
+          .from("payment_records")
+          .select(`
+            id,
+            student_id,
+            school_year,
+            semester,
+            amount_due,
+            amount_paid,
+            balance,
+            payment_status,
+            reference_number,
+            remarks,
+            imported_at,
+            updated_at
+          `)
+          .in("student_id", studentIds);
+
+        if (paymentRecordError) {
+          console.warn(
+            "Unable to load payment records:",
+            paymentRecordError
+          );
+        } else {
+          paymentRecords = paymentRows || [];
+        }
       }
 
       /*
@@ -981,6 +1168,16 @@ if (stepIds.length > 0) {
         ])
       );
 
+      const paymentRecordMap = new Map(
+        paymentRecords.map((record) => [
+          buildPaymentRecordKey({
+            studentId: record.student_id,
+            schoolYear: record.school_year,
+            semester: record.semester,
+          }),
+          record,
+        ])
+      );
 
       /*
       |--------------------------------------------------------------------------
@@ -1104,15 +1301,9 @@ if (stepIds.length > 0) {
             request.student_id
           );
 
-          const section = sectionMap.get(
+          const requestSection = sectionMap.get(
             request.section_id
           );
-
-          const course = section?.course_id
-            ? courseMap.get(
-                section.course_id
-              )
-            : null;
 
           const subject = step.subject_id
             ? subjectMap.get(
@@ -1147,6 +1338,37 @@ if (stepIds.length > 0) {
           const classOffering =
             exactClassOffering ||
             legacyClassOffering;
+
+          /*
+          |--------------------------------------------------------------------------
+          | RESOLVE THE CORRECT DISPLAY SECTION
+          |--------------------------------------------------------------------------
+          |
+          | Regular students normally use the clearance request section.
+          | Irregular/back-subject students must use the exact verified class
+          | offering section instead. This keeps the student under the teacher's
+          | real class (for example BSIT 3rd Year Block C) even when the student's
+          | current enrollment is already 4th Year.
+          |--------------------------------------------------------------------------
+          */
+
+          const offeringSection =
+            classOffering?.section_id
+              ? sectionMap.get(
+                  classOffering.section_id
+                ) || null
+              : null;
+
+          const section =
+            subject && offeringSection
+              ? offeringSection
+              : requestSection;
+
+          const course = section?.course_id
+            ? courseMap.get(
+                section.course_id
+              )
+            : null;
 
           /*
           |--------------------------------------------------------------------------
@@ -1191,6 +1413,14 @@ if (stepIds.length > 0) {
             submissionMap.get(step.id) ||
             null;
 
+          const paymentRecord =
+            paymentRecordMap.get(
+              buildPaymentRecordKey({
+                studentId: request.student_id,
+                schoolYear: request.school_year,
+                semester: request.semester,
+              })
+            ) || null;
 
           const courseCode =
             course?.course_code ||
@@ -1228,6 +1458,16 @@ if (stepIds.length > 0) {
             office?.office_code ||
             "";
 
+          const isFinancialOffice =
+            targetType === "Office" &&
+            (
+              isFinancialOfficeName(
+                office?.office_name
+              ) ||
+              isFinancialOfficeName(
+                office?.office_code
+              )
+            );
 
           /*
           |--------------------------------------------------------------------------
@@ -1238,27 +1478,39 @@ if (stepIds.length > 0) {
           |--------------------------------------------------------------------------
           */
 
+          const displaySchoolYear =
+            targetType === "Subject" && classOffering
+              ? classOffering.school_year || request.school_year
+              : request.school_year;
+
+          const displaySemester =
+            targetType === "Subject" && classOffering
+              ? classOffering.semester || request.semester
+              : request.semester;
+
           const blockBaseKey =
-            request.section_id ||
-            [
-              courseCode,
-              yearLevel,
-              blockCode,
-              request.school_year,
-              request.semester,
-            ].join("|");
+            targetType === "Subject" && classOffering?.section_id
+              ? classOffering.section_id
+              : request.section_id ||
+                [
+                  courseCode,
+                  yearLevel,
+                  blockCode,
+                  displaySchoolYear,
+                  displaySemester,
+                ].join("|");
 
           const blockKey =
             targetType === "Subject"
               ? `class|${blockBaseKey}|${normalizeKeyPart(
-                  request.school_year
+                  displaySchoolYear
                 )}|${normalizeKeyPart(
-                  request.semester
+                  displaySemester
                 )}`
               : `office|${blockBaseKey}|${normalizeKeyPart(
-                  request.school_year
+                  displaySchoolYear
                 )}|${normalizeKeyPart(
-                  request.semester
+                  displaySemester
                 )}`;
 
           const targetKey = subject
@@ -1277,6 +1529,7 @@ if (stepIds.length > 0) {
             subject,
             office,
             submission,
+            paymentRecord,
             classOffering,
             classOfferingId:
               classOffering?.id || null,
@@ -1292,13 +1545,14 @@ if (stepIds.length > 0) {
             blockCode,
 
             schoolYear:
-              request.school_year,
+              displaySchoolYear,
             semester:
-              request.semester,
+              displaySemester,
 
             targetType,
             targetName,
             targetCode,
+            isFinancialOffice,
 
             blockKey,
             targetKey,
@@ -2398,9 +2652,9 @@ if (stepIds.length > 0) {
   | AUTOMATICALLY OPEN THE CORRECT WORKSPACE
   |--------------------------------------------------------------------------
   |
-  | Office-only approvers should not land on an empty Assigned Classes screen.
-  | When the approver has office work but no teaching classes, the dashboard
-  | opens Office Clearances automatically.
+  | Office-only accounts such as the Treasurer should not land on an empty
+  | Assigned Classes screen. When the approver has office work but no teaching
+  | classes, the dashboard opens Office Clearances automatically.
   |--------------------------------------------------------------------------
   */
 
@@ -3723,6 +3977,329 @@ if (stepIds.length > 0) {
     approver?.id,
   ]);
 
+  /*
+  |--------------------------------------------------------------------------
+  | TREASURER / ACCOUNTING FINANCIAL REVIEW
+  |--------------------------------------------------------------------------
+  */
+
+  const openFinancialReview = (
+    item,
+    initialDecision = "Fully Paid"
+  ) => {
+    if (!item?.isFinancialOffice) {
+      return;
+    }
+
+    setSelectedFinancialStep(item);
+
+    const importedPayment =
+      item.paymentRecord || null;
+
+    const suggestedDecision =
+      importedPayment?.payment_status === "Cleared"
+        ? "Fully Paid"
+        : importedPayment?.payment_status === "With Balance"
+        ? "Not Cleared"
+        : initialDecision;
+
+    setFinancialForm({
+      decision:
+        item.financial_decision ||
+        suggestedDecision,
+      remainingBalance:
+        item.remaining_balance ??
+        importedPayment?.balance ??
+        "",
+      paymentDueDate:
+        item.payment_due_date || "",
+      consentConfirmed:
+        Boolean(item.consent_confirmed),
+      remarks:
+        item.financial_notes || "",
+    });
+
+    setShowFinancialModal(true);
+  };
+
+  const closeFinancialReview = () => {
+    if (savingFinancialDecision) {
+      return;
+    }
+
+    setShowFinancialModal(false);
+    setSelectedFinancialStep(null);
+    setFinancialForm(
+      DEFAULT_FINANCIAL_FORM
+    );
+  };
+
+  const handleFinancialFormChange = (
+    event
+  ) => {
+    const {
+      name,
+      value,
+      type,
+      checked,
+    } = event.target;
+
+    setFinancialForm((current) => {
+      const next = {
+        ...current,
+        [name]:
+          type === "checkbox"
+            ? checked
+            : value,
+      };
+
+      if (
+        name === "decision" &&
+        value === "Fully Paid"
+      ) {
+        next.remainingBalance = "0";
+        next.paymentDueDate = "";
+        next.consentConfirmed = false;
+      }
+
+      if (
+        name === "decision" &&
+        value === "Not Cleared"
+      ) {
+        next.paymentDueDate = "";
+        next.consentConfirmed = false;
+      }
+
+      return next;
+    });
+  };
+
+  const submitFinancialReview = async (
+    event
+  ) => {
+    event.preventDefault();
+
+    if (!selectedFinancialStep) {
+      return;
+    }
+
+    const decision =
+      financialForm.decision;
+
+    const isConditional = [
+      "Payment Agreement",
+      "Deferred Payment",
+    ].includes(decision);
+
+    const balance =
+      decision === "Fully Paid"
+        ? 0
+        : Number(
+            financialForm.remainingBalance
+          );
+
+    const remarks =
+      financialForm.remarks.trim();
+
+    if (
+      decision !== "Fully Paid" &&
+      (
+        !Number.isFinite(balance) ||
+        balance < 0
+      )
+    ) {
+      await Swal.fire({
+        icon: "warning",
+        title: "Valid Balance Required",
+        text:
+          "Enter the student's current remaining balance.",
+      });
+
+      return;
+    }
+
+    if (
+      isConditional &&
+      balance <= 0
+    ) {
+      await Swal.fire({
+        icon: "warning",
+        title:
+          "Remaining Balance Required",
+        text:
+          "Conditional clearance requires a remaining balance greater than zero.",
+      });
+
+      return;
+    }
+
+    if (
+      isConditional &&
+      !financialForm.paymentDueDate
+    ) {
+      await Swal.fire({
+        icon: "warning",
+        title:
+          "Payment Date Required",
+        text:
+          "Select the agreed date when the remaining balance will be paid.",
+      });
+
+      return;
+    }
+
+    if (
+      isConditional &&
+      !financialForm.consentConfirmed
+    ) {
+      await Swal.fire({
+        icon: "warning",
+        title:
+          "Consent Confirmation Required",
+        text:
+          "Confirm that the student or parent accepted the payment agreement.",
+      });
+
+      return;
+    }
+
+    if (
+      (
+        isConditional ||
+        decision === "Not Cleared"
+      ) &&
+      !remarks
+    ) {
+      await Swal.fire({
+        icon: "warning",
+        title: "Remarks Required",
+        text:
+          decision === "Not Cleared"
+            ? "Explain why the student is not financially cleared."
+            : "Record the payment agreement or deferred-payment details.",
+      });
+
+      return;
+    }
+
+    const confirmation =
+      await Swal.fire({
+        icon:
+          decision === "Not Cleared"
+            ? "warning"
+            : "question",
+        title:
+          decision === "Not Cleared"
+            ? "Mark as Not Cleared?"
+            : "Save Financial Decision?",
+        html: `
+          <div style="text-align:left;line-height:1.65">
+            <p><strong>Student:</strong> ${
+              selectedFinancialStep.student
+                ?.full_name || "Student"
+            }</p>
+            <p><strong>Decision:</strong> ${decision}</p>
+            <p><strong>Balance:</strong> ${formatCurrency(balance)}</p>
+            ${
+              isConditional
+                ? `<p><strong>Payment due:</strong> ${financialForm.paymentDueDate}</p>`
+                : ""
+            }
+          </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText:
+          decision === "Not Cleared"
+            ? "Confirm Not Cleared"
+            : "Save Decision",
+        confirmButtonColor:
+          decision === "Not Cleared"
+            ? "#dc2626"
+            : "#15803d",
+        cancelButtonText: "Cancel",
+      });
+
+    if (!confirmation.isConfirmed) {
+      return;
+    }
+
+    try {
+      setSavingFinancialDecision(true);
+      setReviewingStepId(
+        selectedFinancialStep.id
+      );
+
+      const { data, error } =
+        await supabase.rpc(
+          "review_financial_clearance_step",
+          {
+            p_step_id:
+              selectedFinancialStep.id,
+            p_decision: decision,
+            p_remaining_balance:
+              decision === "Fully Paid"
+                ? 0
+                : balance,
+            p_payment_due_date:
+              isConditional
+                ? financialForm.paymentDueDate
+                : null,
+            p_consent_confirmed:
+              isConditional
+                ? financialForm.consentConfirmed
+                : false,
+            p_remarks:
+              remarks || null,
+          }
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      closeFinancialReview();
+
+      await Swal.fire({
+        icon:
+          decision === "Not Cleared"
+            ? "info"
+            : "success",
+        title:
+          data?.requestCompleted
+            ? "Clearance Completed"
+            : decision === "Not Cleared"
+            ? "Student Not Cleared"
+            : "Financial Clearance Saved",
+        text:
+          data?.requestCompleted
+            ? "All required clearance steps for this student are now approved."
+            : decision === "Not Cleared"
+            ? "The financial step was marked as Not Cleared and the reason was recorded."
+            : decision === "Fully Paid"
+            ? "The student was recorded as fully paid and financially cleared."
+            : "The student was conditionally cleared under the recorded payment agreement.",
+      });
+
+      await loadDashboard();
+    } catch (error) {
+      console.error(
+        "Financial clearance review error:",
+        error
+      );
+
+      await Swal.fire({
+        icon: "error",
+        title:
+          "Unable to Save Financial Review",
+        text:
+          error?.message ||
+          "The financial clearance decision could not be saved.",
+      });
+    } finally {
+      setSavingFinancialDecision(false);
+      setReviewingStepId(null);
+    }
+  };
 
   /*
   |--------------------------------------------------------------------------
@@ -4163,6 +4740,305 @@ if (stepIds.length > 0) {
     setVerificationResult(null);
   };
 
+  /*
+  |--------------------------------------------------------------------------
+  | TREASURER / ACCOUNTING WORKSPACE DATA
+  |--------------------------------------------------------------------------
+  */
+
+  const financialSteps = useMemo(
+    () =>
+      assignedSteps.filter(
+        (step) => step.isFinancialOffice
+      ),
+    [assignedSteps]
+  );
+
+  const financialCourseOptions = useMemo(
+    () =>
+      [...new Set(
+        financialSteps
+          .map((step) => step.courseCode)
+          .filter(Boolean)
+      )].sort((first, second) =>
+        first.localeCompare(second)
+      ),
+    [financialSteps]
+  );
+
+  const financialYearOptions = useMemo(
+    () =>
+      [...new Set(
+        financialSteps
+          .map((step) => step.yearLevel)
+          .filter(Boolean)
+      )].sort(
+        (first, second) =>
+          getYearSortValue(first) -
+          getYearSortValue(second)
+      ),
+    [financialSteps]
+  );
+
+  const financialCycleOptions = useMemo(
+    () =>
+      [...new Set(
+        financialSteps
+          .map((step) =>
+            [step.semester, step.schoolYear]
+              .filter(Boolean)
+              .join(" • ")
+          )
+          .filter(Boolean)
+      )].sort((first, second) =>
+        second.localeCompare(first)
+      ),
+    [financialSteps]
+  );
+
+  const filteredFinancialSteps = useMemo(() => {
+    const normalizedSearch = searchTerm
+      .trim()
+      .toLowerCase();
+
+    return financialSteps
+      .filter((step) => {
+        if (
+          treasurerStatusFilter !== "All" &&
+          step.status !== treasurerStatusFilter
+        ) {
+          return false;
+        }
+
+        if (
+          treasurerCourseFilter !== "All" &&
+          step.courseCode !== treasurerCourseFilter
+        ) {
+          return false;
+        }
+
+        if (
+          treasurerYearFilter !== "All" &&
+          step.yearLevel !== treasurerYearFilter
+        ) {
+          return false;
+        }
+
+        const cycleLabel = [
+          step.semester,
+          step.schoolYear,
+        ]
+          .filter(Boolean)
+          .join(" • ");
+
+        if (
+          treasurerCycleFilter !== "All" &&
+          cycleLabel !== treasurerCycleFilter
+        ) {
+          return false;
+        }
+
+        if (!normalizedSearch) {
+          return true;
+        }
+
+        return [
+          step.student?.full_name,
+          step.student?.student_id,
+          step.student?.email,
+          step.courseCode,
+          step.courseName,
+          step.yearLevel,
+          step.blockCode,
+          step.semester,
+          step.schoolYear,
+          step.financial_decision,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedSearch);
+      })
+      .sort((first, second) => {
+        const statusOrder = {
+          Pending: 0,
+          Rejected: 1,
+          Approved: 2,
+        };
+
+        const statusDifference =
+          (statusOrder[first.status] ?? 3) -
+          (statusOrder[second.status] ?? 3);
+
+        if (statusDifference !== 0) {
+          return statusDifference;
+        }
+
+        return (
+          first.student?.full_name || ""
+        ).localeCompare(
+          second.student?.full_name || ""
+        );
+      });
+  }, [
+    financialSteps,
+    searchTerm,
+    treasurerStatusFilter,
+    treasurerCourseFilter,
+    treasurerYearFilter,
+    treasurerCycleFilter,
+  ]);
+
+  const financialSummary = useMemo(
+    () => ({
+      pending: financialSteps.filter(
+        (step) => step.status === "Pending"
+      ).length,
+      cleared: financialSteps.filter(
+        (step) => step.status === "Approved"
+      ).length,
+      agreements: financialSteps.filter(
+        (step) =>
+          [
+            "Payment Agreement",
+            "Deferred Payment",
+          ].includes(step.financial_decision)
+      ).length,
+      notCleared: financialSteps.filter(
+        (step) =>
+          step.status === "Rejected" ||
+          step.financial_decision === "Not Cleared"
+      ).length,
+    }),
+    [financialSteps]
+  );
+
+  const isDedicatedFinancialView =
+    isFinancialApprover &&
+    assignedClassOfferings.length === 0;
+
+
+  const exportPaymentRecords = async () => {
+    try {
+      if (!filteredFinancialSteps.length) {
+        await Swal.fire({
+          icon: "info",
+          title: "No Records to Export",
+          text: "There are no financial records matching the current filters.",
+        });
+        return;
+      }
+
+      const escapeCsv = (value) => {
+        const normalized =
+          value === null || value === undefined
+            ? ""
+            : String(value);
+
+        return `"${normalized.replace(/"/g, '""')}"`;
+      };
+
+      const headers = [
+        "Student ID",
+        "Student Name",
+        "Course",
+        "Year Level",
+        "Block",
+        "School Year",
+        "Semester",
+        "Amount Due",
+        "Amount Paid",
+        "Balance",
+        "Payment Status",
+        "OR / Reference Number",
+        "Payment Remarks",
+        "Clearance Status",
+        "Treasurer Decision",
+        "Clearance Remarks",
+        "Financial Record Updated",
+      ];
+
+      const rows = filteredFinancialSteps.map((item) => {
+        const record = item.paymentRecord || {};
+
+        return [
+          item.student?.student_id || "",
+          item.student?.full_name || "",
+          item.courseCode || item.courseName || "",
+          item.yearLevel || "",
+          item.blockCode || "",
+          item.schoolYear || record.school_year || "",
+          item.semester || record.semester || "",
+          Number(record.amount_due || 0).toFixed(2),
+          Number(record.amount_paid || 0).toFixed(2),
+          Number(record.balance || 0).toFixed(2),
+          record.payment_status || "No Record",
+          record.reference_number || "",
+          record.remarks || "",
+          item.status || "",
+          item.financial_decision || "",
+          item.remarks || "",
+          record.updated_at
+            ? new Date(record.updated_at).toLocaleString("en-PH")
+            : "",
+        ];
+      });
+
+      const csv = [
+        headers.map(escapeCsv).join(","),
+        ...rows.map((row) =>
+          row.map(escapeCsv).join(",")
+        ),
+      ].join("\\r\\n");
+
+      const blob = new Blob(
+        ["\\uFEFF", csv],
+        {
+          type: "text/csv;charset=utf-8;",
+        }
+      );
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      const now = new Date();
+      const datePart = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+      ].join("-");
+
+      link.href = url;
+      link.download =
+        `SmartClear-Payment-Records-${datePart}.csv`;
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      await Swal.fire({
+        icon: "success",
+        title: "Payment Records Exported",
+        text: `${filteredFinancialSteps.length} record(s) were exported and can be opened in Excel.`,
+        timer: 1800,
+        showConfirmButton: false,
+      });
+    } catch (error) {
+      console.error(
+        "Payment records export error:",
+        error
+      );
+
+      await Swal.fire({
+        icon: "error",
+        title: "Export Failed",
+        text:
+          error?.message ||
+          "Unable to export the payment records.",
+      });
+    }
+  };
 
   /*
   |--------------------------------------------------------------------------
@@ -5631,24 +6507,36 @@ if (stepIds.length > 0) {
                               </button>
 
                               {item.status === "Pending" ? (
-                                <div className="mt-2 grid grid-cols-2 gap-2">
+                                item.isFinancialOffice ? (
                                   <button
                                     type="button"
                                     disabled={!canReview || isReviewing}
-                                    onClick={() => approveStep(item)}
-                                    className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:opacity-40"
+                                    onClick={() => openFinancialReview(item)}
+                                    className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:opacity-40"
                                   >
-                                    Approve
+                                    <FaMoneyBillWave />
+                                    Financial Review
                                   </button>
-                                  <button
-                                    type="button"
-                                    disabled={!canReview || isReviewing}
-                                    onClick={() => rejectStep(item)}
-                                    className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 transition hover:bg-rose-100 disabled:opacity-40"
-                                  >
-                                    Reject
-                                  </button>
-                                </div>
+                                ) : (
+                                  <div className="mt-2 grid grid-cols-2 gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={!canReview || isReviewing}
+                                      onClick={() => approveStep(item)}
+                                      className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:opacity-40"
+                                    >
+                                      Approve
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={!canReview || isReviewing}
+                                      onClick={() => rejectStep(item)}
+                                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 transition hover:bg-rose-100 disabled:opacity-40"
+                                    >
+                                      Reject
+                                    </button>
+                                  </div>
+                                )
                               ) : (
                                 <p className="mt-3 text-sm font-semibold text-slate-500">
                                   Reviewed {formatDate(item.reviewed_at)}
@@ -5732,6 +6620,8 @@ if (stepIds.length > 0) {
                                         {item.submission ? <FaFileAlt /> : <FaEye />}
                                         {item.submission
                                           ? "Open submission"
+                                          : item.isFinancialOffice
+                                          ? "Financial record"
                                           : item.targetType === "Subject"
                                           ? "Faculty review"
                                           : "Office review"}
@@ -5740,6 +6630,8 @@ if (stepIds.length > 0) {
                                       <p className="mt-1.5 max-w-[220px] text-sm leading-4 text-slate-400">
                                         {item.submission
                                           ? "Student requirement received."
+                                          : item.isFinancialOffice
+                                          ? "No student upload required."
                                           : item.targetType === "Subject"
                                           ? selectedRequirement?.is_active &&
                                             requirementNeedsSubmission(selectedRequirement)
@@ -5758,6 +6650,11 @@ if (stepIds.length > 0) {
                                         {item.status}
                                       </span>
 
+                                      {item.financial_decision && (
+                                        <p className="mt-2 text-xs font-semibold text-emerald-700">
+                                          {item.financial_decision}
+                                        </p>
+                                      )}
 
                                       {item.remarks && (
                                         <p className="mt-1.5 max-w-[220px] line-clamp-2 text-sm leading-4 text-slate-500">
@@ -5767,37 +6664,51 @@ if (stepIds.length > 0) {
                                     </td>
 
                                     <td className="px-4 py-4 text-sm leading-6 text-slate-500">
-                                      {item.targetType === "Subject" && !item.submission
+                                      {item.isFinancialOffice
+                                        ? item.financial_reviewed_at
+                                          ? formatDate(item.financial_reviewed_at)
+                                          : "Financial review required"
+                                        : item.targetType === "Subject" && !item.submission
                                         ? selectedRequirement?.is_active &&
                                           requirementNeedsSubmission(selectedRequirement)
                                           ? "Not submitted"
                                           : "Submission not required"
-                                        : item.submission?.submitted_at
-                                        ? formatDate(item.submission.submitted_at)
-                                        : "Direct office review"}
+                                        : formatDate(item.submission?.submitted_at)}
                                     </td>
 
                                     <td className="px-4 py-4 text-right">
                                       {item.status === "Pending" ? (
-                                        <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                                        item.isFinancialOffice ? (
                                           <button
                                             type="button"
                                             disabled={!canReview || isReviewing}
-                                            onClick={() => approveStep(item)}
-                                            className="px-4 py-2.5 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                            onClick={() => openFinancialReview(item)}
+                                            className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-40"
                                           >
-                                            Approve
+                                            <FaMoneyBillWave />
+                                            Review
                                           </button>
+                                        ) : (
+                                          <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                                            <button
+                                              type="button"
+                                              disabled={!canReview || isReviewing}
+                                              onClick={() => approveStep(item)}
+                                              className="px-4 py-2.5 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                              Approve
+                                            </button>
 
-                                          <button
-                                            type="button"
-                                            disabled={!canReview || isReviewing}
-                                            onClick={() => rejectStep(item)}
-                                            className="border-l border-slate-200 px-4 py-2.5 text-sm font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
-                                          >
-                                            Reject
-                                          </button>
-                                        </div>
+                                            <button
+                                              type="button"
+                                              disabled={!canReview || isReviewing}
+                                              onClick={() => rejectStep(item)}
+                                              className="border-l border-slate-200 px-4 py-2.5 text-sm font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                              Reject
+                                            </button>
+                                          </div>
+                                        )
                                       ) : (
                                         <p className="text-sm font-semibold text-slate-500">
                                           {formatDate(item.reviewed_at)}
@@ -6230,6 +7141,8 @@ if (stepIds.length > 0) {
                           ? "Faculty Review — No Submission Required"
                           : "No Requirement Set"
 
+                        : selectedSubmission.isFinancialOffice
+                        ? "Financial Clearance Review"
                         : "Direct Office Verification"}
 
                     </p>
@@ -6250,6 +7163,8 @@ if (stepIds.length > 0) {
                           ? "This requirement is verified directly by the assigned teacher and does not need a student upload."
                           : "No active requirement is set. The teacher may still approve after confirming the warning."
 
+                        : selectedSubmission.isFinancialOffice
+                        ? "The Treasurer / Cashier checks the official financial record directly. A student upload is not required for this office step."
                         : "No student upload is required for direct office verification. You may approve or reject this exact office clearance step."}
 
                     </p>
@@ -6274,6 +7189,8 @@ if (stepIds.length > 0) {
                         ? "The student has not provided a written submission for this subject requirement."
                         : "No student message is required. Review the student's subject obligations directly."
 
+                      : selectedSubmission.isFinancialOffice
+                      ? "No student submission is required. Use the Financial Review form to record the office's decision."
                       : "No student message was submitted. The assigned office approver may still verify this clearance directly.")}
 
                 </p>
@@ -6318,6 +7235,8 @@ if (stepIds.length > 0) {
                         ? "The student has not uploaded an attachment for this subject requirement."
                         : "No attachment is required for this subject clearance."
 
+                      : selectedSubmission.isFinancialOffice
+                      ? "No student attachment is required for financial clearance review."
                       : "No attachment was uploaded. Direct office verification is still allowed."}
 
                   </p>
@@ -6379,8 +7298,33 @@ if (stepIds.length > 0) {
                 </div>
               </div>
 
-              {selectedSubmission.status === "Pending" && (
-                <div className="flex flex-col gap-3 sm:flex-row">
+              {selectedSubmission.status ===
+
+                "Pending" &&
+                (selectedSubmission.isFinancialOffice ? (
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const item =
+                        selectedSubmission;
+
+                      setSelectedSubmission(
+                        null
+                      );
+
+
+                      openFinancialReview(
+                        item
+                      );
+                    }}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-5 py-3 font-semibold text-white transition hover:bg-emerald-800"
+                  >
+                    <FaMoneyBillWave />
+                    Open Financial Review
+                  </button>
+                ) : (
+                  <div className="flex flex-col gap-3 sm:flex-row">
                     <button
                       type="button"
                       onClick={() => {
@@ -6421,7 +7365,7 @@ if (stepIds.length > 0) {
                         : "Reject Office Clearance"}
                     </button>
                   </div>
-              )}
+                ))}
 
             </div>
           </div>

@@ -515,29 +515,24 @@ function Register() {
   FILTER IRREGULAR SUBJECTS
   =====================================
 
-  IMPORTANT:
+  Irregular students may take back subjects
+  from other year levels or semesters.
 
-  Subjects are filtered by:
+  The irregular subject list is therefore
+  restricted by COURSE only. The student's
+  current year level and semester remain
+  registration information, but they do not
+  hide valid back subjects.
 
-  1. Selected course
-  2. Selected year level
-  3. Selected semester
-  4. Search keyword
-
-  Block and school year are NOT used
-  here because those belong to the
-  exact class offering assignment.
-
+  Administrator verification is still
+  required before account activation and
+  final class-offering assignment.
   =====================================
   */
 
   const academicFilteredSubjects =
     useMemo(() => {
-      if (
-        !selectedCourse ||
-        !formData.year_level ||
-        !formData.semester
-      ) {
+      if (!selectedCourse) {
         return [];
       }
 
@@ -551,16 +546,6 @@ function Register() {
           selectedCourse.course_name
         );
 
-      const selectedYear =
-        normalizeYearLevel(
-          formData.year_level
-        );
-
-      const selectedSemester =
-        normalizeSemester(
-          formData.semester
-        );
-
       return subjects.filter(
         (subject) => {
           const subjectProgram =
@@ -568,60 +553,34 @@ function Register() {
               subject.program
             );
 
-          const subjectYear =
-            normalizeYearLevel(
-              subject.year_level
-            );
-
-          const subjectSemester =
-            normalizeSemester(
-              subject.semester
-            );
-
-          /*
-          -------------------------------------
-          COURSE MATCH
-          -------------------------------------
-
-          Supports values such as:
-
-          BSIT
-          Bachelor of Science in Information Technology
-          BSIT - Bachelor of Science...
-          */
+          if (!subjectProgram) {
+            return false;
+          }
 
           const courseMatches =
             subjectProgram ===
               selectedCourseCode ||
             subjectProgram ===
               selectedCourseName ||
-            subjectProgram.includes(
-              selectedCourseCode
+            (
+              Boolean(selectedCourseCode) &&
+              subjectProgram.includes(
+                selectedCourseCode
+              )
             ) ||
-            selectedCourseName.includes(
-              subjectProgram
+            (
+              Boolean(subjectProgram) &&
+              selectedCourseName.includes(
+                subjectProgram
+              )
             );
 
-          const yearMatches =
-            subjectYear ===
-            selectedYear;
-
-          const semesterMatches =
-            subjectSemester ===
-            selectedSemester;
-
-          return (
-            courseMatches &&
-            yearMatches &&
-            semesterMatches
-          );
+          return courseMatches;
         }
       );
     }, [
       subjects,
       selectedCourse,
-      formData.year_level,
-      formData.semester,
     ]);
 
   /*
@@ -741,8 +700,6 @@ function Register() {
     setSubjectSearch("");
   }, [
     formData.course_id,
-    formData.year_level,
-    formData.semester,
   ]);
 
   /*
@@ -846,13 +803,7 @@ function Register() {
         must not remain attached silently.
         */
 
-        if (
-          [
-            "course_id",
-            "year_level",
-            "semester",
-          ].includes(name)
-        ) {
+        if (name === "course_id") {
           nextData.irregular_subject_ids =
             [];
         }
@@ -1063,7 +1014,7 @@ function Register() {
       ) {
         showValidationWarning(
           "No Matching Subjects",
-          "There are no active subjects configured for the selected course, year level, and semester."
+          "There are no active subjects configured for the selected course."
         );
 
         return false;
@@ -1077,7 +1028,7 @@ function Register() {
       ) {
         showValidationWarning(
           "Irregular Subject Required",
-          "Please select at least one subject from your selected course, year level, and semester."
+          "Please select at least one subject from your selected course."
         );
 
         return false;
@@ -2183,7 +2134,7 @@ function Register() {
                                     "Irregular Student",
 
                                   description:
-                                    "Select your subjects from the chosen course, year level, and semester.",
+                                    "Select applicable subjects from your course, including back subjects from other year levels or semesters.",
                                 },
                               ].map(
                                 (
@@ -2289,22 +2240,7 @@ function Register() {
                                       </h3>
 
                                       <p className="mt-1 text-xs leading-5 text-slate-500">
-                                        Only
-                                        subjects
-                                        matching
-                                        your
-                                        selected
-                                        course,
-                                        year level,
-                                        and
-                                        semester
-                                        are shown.
-                                        Your
-                                        selections
-                                        will still
-                                        be verified
-                                        by the
-                                        Administrator.
+                                        Subjects from your selected course are shown across year levels and semesters. Select the subjects you actually take, including back subjects. Your selections will still be verified by the Administrator.
                                       </p>
                                     </div>
 
@@ -2326,26 +2262,18 @@ function Register() {
                                     </div>
                                   </div>
 
-                                  {selectedCourse &&
-                                    formData.year_level &&
-                                    formData.semester && (
+                                  {selectedCourse && (
                                       <div className="mt-3 flex flex-wrap gap-2">
                                         <span className="rounded-full bg-blue-100 px-3 py-1 text-[11px] font-bold text-blue-700">
-                                          {
-                                            selectedCourse.course_code
-                                          }
+                                          {selectedCourse.course_code}
                                         </span>
 
-                                        <span className="rounded-full bg-blue-100 px-3 py-1 text-[11px] font-bold text-blue-700">
-                                          {
-                                            formData.year_level
-                                          }
+                                        <span className="rounded-full bg-amber-100 px-3 py-1 text-[11px] font-bold text-amber-700">
+                                          All year levels
                                         </span>
 
-                                        <span className="rounded-full bg-blue-100 px-3 py-1 text-[11px] font-bold text-blue-700">
-                                          {
-                                            formData.semester
-                                          }
+                                        <span className="rounded-full bg-amber-100 px-3 py-1 text-[11px] font-bold text-amber-700">
+                                          All semesters
                                         </span>
                                       </div>
                                     )}
@@ -2367,11 +2295,9 @@ function Register() {
                                             .value
                                         )
                                       }
-                                      placeholder="Search within matching subjects..."
+                                      placeholder="Search subjects in your course..."
                                       disabled={
-                                        !selectedCourse ||
-                                        !formData.year_level ||
-                                        !formData.semester
+                                        !selectedCourse
                                       }
                                       className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-11 pr-20 text-sm outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
                                     />
@@ -2393,9 +2319,7 @@ function Register() {
                                 </div>
 
                                 <div className="h-64 space-y-2 overflow-y-scroll overscroll-contain p-3 touch-pan-y [scrollbar-gutter:stable] sm:h-80 sm:p-4 lg:h-96">
-                                  {!selectedCourse ||
-                                  !formData.year_level ||
-                                  !formData.semester ? (
+                                  {!selectedCourse ? (
                                     <div className="py-10 text-center">
                                       <FaBookOpen className="mx-auto text-3xl text-slate-300" />
 
@@ -2408,17 +2332,7 @@ function Register() {
                                       </p>
 
                                       <p className="mt-1 text-xs leading-5 text-slate-400">
-                                        Select
-                                        Course,
-                                        Year
-                                        Level,
-                                        and
-                                        Semester
-                                        to view
-                                        the
-                                        available
-                                        irregular
-                                        subjects.
+                                        Select your Course to view available irregular subjects across year levels and semesters.
                                       </p>
                                     </div>
                                   ) : loadingSubjects ? (
@@ -2457,8 +2371,8 @@ function Register() {
                                       <p className="mt-1 text-xs leading-5 text-slate-400">
                                         {academicFilteredSubjects.length ===
                                         0
-                                          ? `No active subjects are configured for ${selectedCourse?.course_code || "this course"}, ${formData.year_level}, ${formData.semester}.`
-                                          : "No subject matches your search within the selected academic filters."}
+                                          ? `No active subjects are configured for ${selectedCourse?.course_code || "this course"}.`
+                                          : "No subject matches your search within the selected course."}
                                       </p>
                                     </div>
                                   ) : (

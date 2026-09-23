@@ -512,7 +512,22 @@ function ClassAssignmentManagement() {
         return [];
       }
 
-      const foundYears = sections
+      /*
+       * Always show the four official college year levels.
+       *
+       * Before, this dropdown depended only on rows already present
+       * in `sections`. That is why 3rd Year could disappear entirely.
+       * The actual block choices are still loaded from `sections`, so
+       * this does not invent a class or assignment.
+       */
+      const officialYearLevels = [
+        "1st Year",
+        "2nd Year",
+        "3rd Year",
+        "4th Year",
+      ];
+
+      const databaseYearLevels = sections
         .filter((section) =>
           sectionMatchesCourse(
             section,
@@ -526,7 +541,10 @@ function ClassAssignmentManagement() {
         .filter(Boolean);
 
       return [
-        ...new Set(foundYears),
+        ...new Set([
+          ...officialYearLevels,
+          ...databaseYearLevels,
+        ]),
       ].sort(
         (first, second) =>
           getYearLevelOrder(first) -

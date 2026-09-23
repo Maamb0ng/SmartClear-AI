@@ -22,13 +22,27 @@ function normalizeYearLevel(value) {
     return directNumber;
   }
 
-  if (normalized.includes("1st") || normalized.includes("first")) return 1;
-  if (normalized.includes("2nd") || normalized.includes("second")) return 2;
-  if (normalized.includes("3rd") || normalized.includes("third")) return 3;
-  if (normalized.includes("4th") || normalized.includes("fourth")) return 4;
+  if (normalized.includes("1st") || normalized.includes("first")) {
+    return 1;
+  }
+
+  if (normalized.includes("2nd") || normalized.includes("second")) {
+    return 2;
+  }
+
+  if (normalized.includes("3rd") || normalized.includes("third")) {
+    return 3;
+  }
+
+  if (normalized.includes("4th") || normalized.includes("fourth")) {
+    return 4;
+  }
 
   const extractedNumber = normalized.match(/[1-4]/);
-  return extractedNumber ? Number(extractedNumber[0]) : null;
+
+  return extractedNumber
+    ? Number(extractedNumber[0])
+    : null;
 }
 
 function normalizeBlock(value) {
@@ -63,7 +77,12 @@ function getSectionCourse(section) {
 }
 
 function getSectionYearLevel(section) {
-  return section?.year_level || section?.year || section?.level || "";
+  return (
+    section?.year_level ||
+    section?.year ||
+    section?.level ||
+    ""
+  );
 }
 
 function getSectionBlock(section) {
@@ -81,14 +100,19 @@ export async function getUsers() {
   const { data, error } = await supabase
     .from("users")
     .select("*")
-    .order("created_at", { ascending: false });
+    .order("created_at", {
+      ascending: false,
+    });
 
   if (error) throw error;
+
   return data || [];
 }
 
 export async function getUser(id) {
-  if (!id) throw new Error("User ID is required.");
+  if (!id) {
+    throw new Error("User ID is required.");
+  }
 
   const { data, error } = await supabase
     .from("users")
@@ -97,11 +121,14 @@ export async function getUser(id) {
     .single();
 
   if (error) throw error;
+
   return data;
 }
 
 export async function updateUser(id, updates) {
-  if (!id) throw new Error("User ID is required.");
+  if (!id) {
+    throw new Error("User ID is required.");
+  }
 
   const { data, error } = await supabase
     .from("users")
@@ -111,6 +138,7 @@ export async function updateUser(id, updates) {
     .single();
 
   if (error) throw error;
+
   return data;
 }
 
@@ -121,6 +149,12 @@ export async function approveUser(user) {
 
   const role = normalizeText(user.role);
   const isStudent = role.includes("student");
+
+  /*
+   * ============================================================
+   * NON-STUDENT ACCOUNTS
+   * ============================================================
+   */
 
   if (!isStudent) {
     const { data, error } = await supabase
@@ -134,43 +168,81 @@ export async function approveUser(user) {
       .single();
 
     if (error) throw error;
+
     return data;
   }
 
-  const studentType =
-    normalizeText(
-      user.student_type ||
-        user.student_classification ||
-        "Regular"
-    );
+  /*
+   * ============================================================
+   * STUDENT TYPE
+   * ============================================================
+   */
+
+  const studentType = normalizeText(
+    user.student_type ||
+      user.student_classification ||
+      "Regular"
+  );
+
+  /*
+   * ============================================================
+   * IRREGULAR STUDENT VALIDATION
+   * ============================================================
+   *
+   * student_irregular_subjects.student_id stores the visible
+   * Student ID / Student Number, NOT users.id.
+   *
+   * Example:
+   *
+   * users.id
+   *   = UUID
+   *
+   * users.student_id
+   *   = 01231234145
+   *
+   * student_irregular_subjects.student_id
+   *   = 01231234145
+   *
+   * Therefore we MUST use user.student_id here.
+   * ============================================================
+   */
 
   if (studentType === "irregular") {
+    if (!user.student_id) {
+      throw new Error(
+        "This irregular student has no Student ID. Please verify the registration information first."
+      );
+    }
+
     const {
-      data:
-        irregularAssignments,
-      error:
-        irregularAssignmentsError,
+      data: irregularAssignments,
+      error: irregularAssignmentsError,
     } = await supabase
-      .from(
-        "student_irregular_subjects"
-      )
-      .select(
-        "id, verification_status, class_offering_id"
-      )
+      .from("student_irregular_subjects")
+      .select(`
+        id,
+        student_id,
+        subject_id,
+        verification_status,
+        class_offering_id,
+        semester,
+        school_year,
+        remarks,
+        verified_by,
+        verified_at
+      `)
       .eq(
         "student_id",
-        user.id
+        String(user.student_id)
       );
 
-    if (
-      irregularAssignmentsError
-    ) {
+    if (irregularAssignmentsError) {
       if (
         irregularAssignmentsError.code ===
         "42P01"
       ) {
         throw new Error(
-          "The irregular-subject workflow is not installed yet. Run setup_irregular_subject_workflow.sql in Supabase."
+          "The irregular-subject workflow is not installed yet. Please configure the irregular student workflow in Supabase first."
         );
       }
 
@@ -180,32 +252,72 @@ export async function approveUser(user) {
     const assignments =
       irregularAssignments || [];
 
-    if (
-      assignments.length === 0
-    ) {
+    /*
+     * Student selected Irregular during registration,
+     * but there are no saved subjects.
+     */
+    if (assignments.length === 0) {
       throw new Error(
         "This irregular student has no saved subject selections. Open Selected Subjects in User Management and verify the registration data first."
       );
     }
 
-    const unapprovedCount =
+    /*
+     * Every irregular subject MUST:
+     *
+     * 1. Be Approved by Administrator
+     * 2. Have an exact class_offering_id
+     *
+     * This ensures the subject is connected to the
+     * correct:
+     *
+     * Course
+     * Year Level
+     * Block
+     * Subject
+     * Teacher
+     * Semester
+     * School Year
+     */
+    const unapprovedAssignments =
       assignments.filter(
-        (assignment) =>
-          assignment.verification_status !==
-            "Approved" ||
-          !assignment.class_offering_id
-      ).length;
+        (assignment) => {
+          const status =
+            normalizeText(
+              assignment.verification_status
+            );
 
-    if (unapprovedCount > 0) {
+          return (
+            status !== "approved" ||
+            !assignment.class_offering_id
+          );
+        }
+      );
+
+    if (unapprovedAssignments.length > 0) {
       throw new Error(
-        `${unapprovedCount} irregular subject selection(s) still require Administrator verification and an official class offering before this account can be activated.`
+        `${unapprovedAssignments.length} irregular subject selection(s) still require Administrator verification and an official class offering before this account can be activated.`
       );
     }
   }
 
-  const course = normalizeCourse(user.course);
-  const yearLevel = normalizeYearLevel(user.year_level);
-  const block = normalizeBlock(getUserBlock(user));
+  /*
+   * ============================================================
+   * OFFICIAL STUDENT SECTION VALIDATION
+   * ============================================================
+   */
+
+  const course = normalizeCourse(
+    user.course
+  );
+
+  const yearLevel = normalizeYearLevel(
+    user.year_level
+  );
+
+  const block = normalizeBlock(
+    getUserBlock(user)
+  );
 
   if (!course) {
     throw new Error(
@@ -216,7 +328,8 @@ export async function approveUser(user) {
   if (!yearLevel) {
     throw new Error(
       `The student has no valid year level. Current value: ${
-        user.year_level || "Not provided"
+        user.year_level ||
+        "Not provided"
       }.`
     );
   }
@@ -227,28 +340,58 @@ export async function approveUser(user) {
     );
   }
 
-  const { data: sections, error: sectionsError } = await supabase
+  /*
+   * ============================================================
+   * FIND OFFICIAL SECTION
+   * ============================================================
+   *
+   * Even an irregular student still has an official/current
+   * section for their present academic placement.
+   *
+   * Their back subjects are routed separately using
+   * student_irregular_subjects.class_offering_id.
+   * ============================================================
+   */
+
+  const {
+    data: sections,
+    error: sectionsError,
+  } = await supabase
     .from("sections")
     .select(`
       *,
       courses (*)
     `);
 
-  if (sectionsError) throw sectionsError;
+  if (sectionsError) {
+    throw sectionsError;
+  }
 
-  const matchingSection = (sections || []).find((section) => {
-    const sectionCourse = normalizeCourse(getSectionCourse(section));
-    const sectionYearLevel = normalizeYearLevel(
-      getSectionYearLevel(section)
-    );
-    const sectionBlock = normalizeBlock(getSectionBlock(section));
+  const matchingSection =
+    (sections || []).find(
+      (section) => {
+        const sectionCourse =
+          normalizeCourse(
+            getSectionCourse(section)
+          );
 
-    return (
-      sectionCourse === course &&
-      sectionYearLevel === yearLevel &&
-      sectionBlock === block
+        const sectionYearLevel =
+          normalizeYearLevel(
+            getSectionYearLevel(section)
+          );
+
+        const sectionBlock =
+          normalizeBlock(
+            getSectionBlock(section)
+          );
+
+        return (
+          sectionCourse === course &&
+          sectionYearLevel === yearLevel &&
+          sectionBlock === block
+        );
+      }
     );
-  });
 
   if (!matchingSection) {
     throw new Error(
@@ -256,7 +399,16 @@ export async function approveUser(user) {
     );
   }
 
-  const { data: approvedUser, error: approvalError } = await supabase
+  /*
+   * ============================================================
+   * ACTIVATE STUDENT
+   * ============================================================
+   */
+
+  const {
+    data: approvedUser,
+    error: approvalError,
+  } = await supabase
     .from("users")
     .update({
       section_id: matchingSection.id,
@@ -267,12 +419,17 @@ export async function approveUser(user) {
     .select()
     .single();
 
-  if (approvalError) throw approvalError;
+  if (approvalError) {
+    throw approvalError;
+  }
+
   return approvedUser;
 }
 
 export async function rejectUser(id) {
-  if (!id) throw new Error("User ID is required.");
+  if (!id) {
+    throw new Error("User ID is required.");
+  }
 
   const { data, error } = await supabase
     .from("users")
@@ -284,6 +441,7 @@ export async function rejectUser(id) {
     .single();
 
   if (error) throw error;
+
   return data;
 }
 
@@ -302,17 +460,15 @@ export async function deleteUser(user) {
   const {
     data,
     error,
-  } =
-    await supabase.functions.invoke(
-      "delete-user-account",
-      {
-        body: {
-          userId,
-          confirmation:
-            "DELETE",
-        },
-      }
-    );
+  } = await supabase.functions.invoke(
+    "delete-user-account",
+    {
+      body: {
+        userId,
+        confirmation: "DELETE",
+      },
+    }
+  );
 
   if (error) {
     let message =
@@ -331,15 +487,13 @@ export async function deleteUser(user) {
       // Keep the original Edge Function error message.
     }
 
-    throw new Error(
-      message
-    );
+    throw new Error(message);
   }
 
   if (!data?.success) {
     throw new Error(
       data?.error ||
-      "The account could not be deleted."
+        "The account could not be deleted."
     );
   }
 

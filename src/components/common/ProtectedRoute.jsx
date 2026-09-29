@@ -14,10 +14,22 @@ import {
 
 import { supabase } from "../../services/supabase";
 
+/*
+|--------------------------------------------------------------------------
+| HELPERS
+|--------------------------------------------------------------------------
+*/
+
 const normalizeValue = (value) =>
   String(value || "")
     .trim()
     .toLowerCase();
+
+/*
+|--------------------------------------------------------------------------
+| FINANCIAL OFFICE
+|--------------------------------------------------------------------------
+*/
 
 const FINANCIAL_KEYWORDS = [
   "treasurer",
@@ -27,45 +39,127 @@ const FINANCIAL_KEYWORDS = [
   "financial",
 ];
 
-const isFinancialOffice = (office) => {
-  const officeCode = normalizeValue(
-    office?.office_code
-  );
+const isFinancialOffice = (
+  office
+) => {
+  const officeCode =
+    normalizeValue(
+      office?.office_code
+    );
 
-  const officeName = normalizeValue(
-    office?.office_name
-  );
+  const officeName =
+    normalizeValue(
+      office?.office_name
+    );
 
-  if (officeCode === "fin") {
+  if (
+    officeCode === "fin"
+  ) {
     return true;
   }
 
   return FINANCIAL_KEYWORDS.some(
     (keyword) =>
-      officeName.includes(keyword)
+      officeName.includes(
+        keyword
+      )
   );
 };
 
+/*
+|--------------------------------------------------------------------------
+| GUIDANCE OFFICE
+|--------------------------------------------------------------------------
+*/
+
+const GUIDANCE_KEYWORDS = [
+  "guidance",
+  "guidance counselor",
+  "guidance office",
+];
+
+const isGuidanceOffice = (
+  office
+) => {
+  const officeCode =
+    normalizeValue(
+      office?.office_code
+    );
+
+  const officeName =
+    normalizeValue(
+      office?.office_name
+    );
+
+  if (
+    officeCode === "gui"
+  ) {
+    return true;
+  }
+
+  return GUIDANCE_KEYWORDS.some(
+    (keyword) =>
+      officeName.includes(
+        keyword
+      )
+  );
+};
+
+/*
+|--------------------------------------------------------------------------
+| DEFAULT DASHBOARD
+|--------------------------------------------------------------------------
+*/
+
 const getRoleDashboard = (
   role,
-  isTreasurer = false
+  {
+    isTreasurer = false,
+    isGuidance = false,
+  } = {}
 ) => {
   const normalizedRole =
     normalizeValue(role);
 
-  if (normalizedRole === "student") {
+  if (
+    normalizedRole ===
+    "student"
+  ) {
     return "/student/dashboard";
   }
 
-  if (normalizedRole === "approver") {
-    return isTreasurer
-      ? "/treasurer/dashboard"
-      : "/approver/dashboard";
+  if (
+    normalizedRole ===
+    "approver"
+  ) {
+    /*
+    |--------------------------------------------------------------------------
+    | SPECIALIZED APPROVER PORTALS
+    |--------------------------------------------------------------------------
+    |
+    | Priority:
+    | 1. Treasurer
+    | 2. Guidance
+    | 3. Regular Approver
+    |--------------------------------------------------------------------------
+    */
+
+    if (isTreasurer) {
+      return "/treasurer/dashboard";
+    }
+
+    if (isGuidance) {
+      return "/guidance/dashboard";
+    }
+
+    return "/approver/dashboard";
   }
 
   if (
-    normalizedRole === "administrator" ||
-    normalizedRole === "admin"
+    normalizedRole ===
+      "administrator" ||
+    normalizedRole ===
+      "admin"
   ) {
     return "/admin/dashboard";
   }
@@ -73,34 +167,59 @@ const getRoleDashboard = (
   return "/login";
 };
 
+/*
+|--------------------------------------------------------------------------
+| PROTECTED ROUTE
+|--------------------------------------------------------------------------
+*/
+
 function ProtectedRoute({
   allowedRoles = [],
   portal = null,
 }) {
-  const location = useLocation();
+  const location =
+    useLocation();
 
-  const mountedRef = useRef(false);
+  const mountedRef =
+    useRef(false);
 
   const loadedAuthUserIdRef =
     useRef(null);
 
-  const [initialLoading, setInitialLoading] =
-    useState(true);
+  const [
+    initialLoading,
+    setInitialLoading,
+  ] = useState(true);
 
-  const [profileLoading, setProfileLoading] =
-    useState(false);
+  const [
+    profileLoading,
+    setProfileLoading,
+  ] = useState(false);
 
-  const [session, setSession] =
-    useState(null);
+  const [
+    session,
+    setSession,
+  ] = useState(null);
 
-  const [profile, setProfile] =
-    useState(null);
+  const [
+    profile,
+    setProfile,
+  ] = useState(null);
 
-  const [isTreasurer, setIsTreasurer] =
-    useState(false);
+  const [
+    isTreasurer,
+    setIsTreasurer,
+  ] = useState(false);
 
-  const [accessError, setAccessError] =
-    useState("");
+  const [
+    isGuidance,
+    setIsGuidance,
+  ] = useState(false);
+
+  const [
+    accessError,
+    setAccessError,
+  ] = useState("");
 
   const normalizedAllowedRoles =
     useMemo(
@@ -113,59 +232,120 @@ function ProtectedRoute({
 
   /*
   |--------------------------------------------------------------------------
-  | CHECK TREASURER ASSIGNMENT
+  | LOAD ACTIVE OFFICE ASSIGNMENTS
+  |--------------------------------------------------------------------------
+  |
+  | Treasurer, Guidance and other office approvers all use the database role:
+  |
+  |   Approver
+  |
+  | Portal separation is determined from active approver_assignments.
   |--------------------------------------------------------------------------
   */
 
-  const checkTreasurerAssignment =
-    useCallback(async (profileId) => {
-      if (!profileId) {
-        return false;
-      }
-
-      try {
-        const {
-          data,
-          error,
-        } = await supabase
-          .from("approver_assignments")
-          .select(`
-            id,
-            office_id,
-            approver_id,
-            is_active,
-            offices (
-              id,
-              office_name,
-              office_code,
-              is_active
-            )
-          `)
-          .eq("approver_id", profileId)
-          .eq("is_active", true)
-          .not("office_id", "is", null);
-
-        if (error) {
-          throw error;
+  const checkApproverPortalAssignments =
+    useCallback(
+      async (
+        profileId
+      ) => {
+        if (!profileId) {
+          return {
+            isTreasurer:
+              false,
+            isGuidance:
+              false,
+          };
         }
 
-        return (data || []).some(
-          (assignment) =>
-            assignment.offices
-              ?.is_active !== false &&
-            isFinancialOffice(
-              assignment.offices
+        try {
+          const {
+            data,
+            error,
+          } = await supabase
+            .from(
+              "approver_assignments"
             )
-        );
-      } catch (error) {
-        console.error(
-          "Treasurer assignment check error:",
-          error
-        );
+            .select(`
+              id,
+              office_id,
+              approver_id,
+              is_active,
+              offices (
+                id,
+                office_name,
+                office_code,
+                is_active
+              )
+            `)
+            .eq(
+              "approver_id",
+              profileId
+            )
+            .eq(
+              "is_active",
+              true
+            )
+            .not(
+              "office_id",
+              "is",
+              null
+            );
 
-        throw error;
-      }
-    }, []);
+          if (error) {
+            throw error;
+          }
+
+          const activeAssignments =
+            (
+              data || []
+            ).filter(
+              (
+                assignment
+              ) =>
+                assignment
+                  .offices
+                  ?.is_active !==
+                false
+            );
+
+          const treasurerAccount =
+            activeAssignments.some(
+              (
+                assignment
+              ) =>
+                isFinancialOffice(
+                  assignment.offices
+                )
+            );
+
+          const guidanceAccount =
+            activeAssignments.some(
+              (
+                assignment
+              ) =>
+                isGuidanceOffice(
+                  assignment.offices
+                )
+            );
+
+          return {
+            isTreasurer:
+              treasurerAccount,
+
+            isGuidance:
+              guidanceAccount,
+          };
+        } catch (error) {
+          console.error(
+            "Approver portal assignment check error:",
+            error
+          );
+
+          throw error;
+        }
+      },
+      []
+    );
 
   /*
   |--------------------------------------------------------------------------
@@ -190,11 +370,17 @@ function ProtectedRoute({
             showLoader &&
             mountedRef.current
           ) {
-            setProfileLoading(true);
+            setProfileLoading(
+              true
+            );
           }
 
-          if (mountedRef.current) {
-            setAccessError("");
+          if (
+            mountedRef.current
+          ) {
+            setAccessError(
+              ""
+            );
           }
 
           const {
@@ -225,32 +411,60 @@ function ProtectedRoute({
             );
           }
 
-          let treasurerAccount = false;
+          let treasurerAccount =
+            false;
+
+          let guidanceAccount =
+            false;
+
+          /*
+          |--------------------------------------------------------------------------
+          | APPROVER PORTAL DETECTION
+          |--------------------------------------------------------------------------
+          */
 
           if (
-            normalizeValue(data.role) ===
-            "approver"
+            normalizeValue(
+              data.role
+            ) === "approver"
           ) {
-            treasurerAccount =
-              await checkTreasurerAssignment(
+            const portalAccess =
+              await checkApproverPortalAssignments(
                 data.id
               );
+
+            treasurerAccount =
+              portalAccess.isTreasurer;
+
+            guidanceAccount =
+              portalAccess.isGuidance;
           }
 
-          if (mountedRef.current) {
+          if (
+            mountedRef.current
+          ) {
             loadedAuthUserIdRef.current =
               authUserId;
 
             setProfile(data);
+
             setIsTreasurer(
               treasurerAccount
+            );
+
+            setIsGuidance(
+              guidanceAccount
             );
           }
 
           return {
             profile: data,
+
             isTreasurer:
               treasurerAccount,
+
+            isGuidance:
+              guidanceAccount,
           };
         } catch (error) {
           console.error(
@@ -258,9 +472,18 @@ function ProtectedRoute({
             error
           );
 
-          if (mountedRef.current) {
+          if (
+            mountedRef.current
+          ) {
             setProfile(null);
-            setIsTreasurer(false);
+
+            setIsTreasurer(
+              false
+            );
+
+            setIsGuidance(
+              false
+            );
 
             setAccessError(
               error?.message ||
@@ -274,11 +497,15 @@ function ProtectedRoute({
             showLoader &&
             mountedRef.current
           ) {
-            setProfileLoading(false);
+            setProfileLoading(
+              false
+            );
           }
         }
       },
-      [checkTreasurerAssignment]
+      [
+        checkApproverPortalAssignments,
+      ]
     );
 
   /*
@@ -288,12 +515,15 @@ function ProtectedRoute({
   */
 
   useEffect(() => {
-    mountedRef.current = true;
+    mountedRef.current =
+      true;
 
     const initializeAccess =
       async () => {
         try {
-          setInitialLoading(true);
+          setInitialLoading(
+            true
+          );
 
           const {
             data,
@@ -306,21 +536,29 @@ function ProtectedRoute({
           }
 
           const currentSession =
-            data?.session || null;
+            data?.session ||
+            null;
 
-          if (!mountedRef.current) {
+          if (
+            !mountedRef.current
+          ) {
             return;
           }
 
-          setSession(currentSession);
+          setSession(
+            currentSession
+          );
 
           if (
-            currentSession?.user?.id
+            currentSession
+              ?.user?.id
           ) {
             await loadProfile(
-              currentSession.user.id,
+              currentSession
+                .user.id,
               {
-                showLoader: false,
+                showLoader:
+                  false,
               }
             );
           } else {
@@ -328,7 +566,14 @@ function ProtectedRoute({
               null;
 
             setProfile(null);
-            setIsTreasurer(false);
+
+            setIsTreasurer(
+              false
+            );
+
+            setIsGuidance(
+              false
+            );
           }
         } catch (error) {
           console.error(
@@ -336,10 +581,20 @@ function ProtectedRoute({
             error
           );
 
-          if (mountedRef.current) {
+          if (
+            mountedRef.current
+          ) {
             setSession(null);
+
             setProfile(null);
-            setIsTreasurer(false);
+
+            setIsTreasurer(
+              false
+            );
+
+            setIsGuidance(
+              false
+            );
 
             setAccessError(
               error?.message ||
@@ -347,8 +602,12 @@ function ProtectedRoute({
             );
           }
         } finally {
-          if (mountedRef.current) {
-            setInitialLoading(false);
+          if (
+            mountedRef.current
+          ) {
+            setInitialLoading(
+              false
+            );
           }
         }
       };
@@ -362,56 +621,119 @@ function ProtectedRoute({
     */
 
     const {
-      data: { subscription },
+      data: {
+        subscription,
+      },
     } =
       supabase.auth.onAuthStateChange(
-        (event, nextSession) => {
-          if (!mountedRef.current) {
+        (
+          event,
+          nextSession
+        ) => {
+          if (
+            !mountedRef.current
+          ) {
             return;
           }
 
-          if (event === "SIGNED_OUT") {
+          /*
+          |--------------------------------------------------------------------------
+          | SIGNED OUT
+          |--------------------------------------------------------------------------
+          */
+
+          if (
+            event ===
+            "SIGNED_OUT"
+          ) {
             loadedAuthUserIdRef.current =
               null;
 
             setSession(null);
+
             setProfile(null);
-            setIsTreasurer(false);
-            setAccessError("");
-            setInitialLoading(false);
-            setProfileLoading(false);
 
-            return;
-          }
+            setIsTreasurer(
+              false
+            );
 
-          if (
-            event === "TOKEN_REFRESHED"
-          ) {
-            setSession(
-              nextSession || null
+            setIsGuidance(
+              false
+            );
+
+            setAccessError(
+              ""
+            );
+
+            setInitialLoading(
+              false
+            );
+
+            setProfileLoading(
+              false
             );
 
             return;
           }
 
+          /*
+          |--------------------------------------------------------------------------
+          | TOKEN REFRESH
+          |--------------------------------------------------------------------------
+          */
+
           if (
-            event === "SIGNED_IN" ||
-            event === "USER_UPDATED" ||
-            event === "INITIAL_SESSION"
+            event ===
+            "TOKEN_REFRESHED"
+          ) {
+            setSession(
+              nextSession ||
+                null
+            );
+
+            return;
+          }
+
+          /*
+          |--------------------------------------------------------------------------
+          | LOGIN / PROFILE UPDATE
+          |--------------------------------------------------------------------------
+          */
+
+          if (
+            event ===
+              "SIGNED_IN" ||
+            event ===
+              "USER_UPDATED" ||
+            event ===
+              "INITIAL_SESSION"
           ) {
             const nextUserId =
-              nextSession?.user?.id;
+              nextSession
+                ?.user?.id;
 
             setSession(
-              nextSession || null
+              nextSession ||
+                null
             );
 
-            if (!nextUserId) {
+            if (
+              !nextUserId
+            ) {
               loadedAuthUserIdRef.current =
                 null;
 
-              setProfile(null);
-              setIsTreasurer(false);
+              setProfile(
+                null
+              );
+
+              setIsTreasurer(
+                false
+              );
+
+              setIsGuidance(
+                false
+              );
 
               return;
             }
@@ -423,7 +745,8 @@ function ProtectedRoute({
               loadProfile(
                 nextUserId,
                 {
-                  showLoader: true,
+                  showLoader:
+                    true,
                 }
               );
             }
@@ -432,7 +755,9 @@ function ProtectedRoute({
       );
 
     return () => {
-      mountedRef.current = false;
+      mountedRef.current =
+        false;
+
       subscription.unsubscribe();
     };
   }, [loadProfile]);
@@ -457,8 +782,9 @@ function ProtectedRoute({
           </h1>
 
           <p className="mt-2 text-sm text-slate-500">
-            SmartClear AI is verifying
-            your account and portal access.
+            SmartClear AI is
+            verifying your account
+            and portal access.
           </p>
         </div>
       </main>
@@ -471,7 +797,9 @@ function ProtectedRoute({
   |--------------------------------------------------------------------------
   */
 
-  if (!session?.user) {
+  if (
+    !session?.user
+  ) {
     return (
       <Navigate
         to="/login"
@@ -500,7 +828,8 @@ function ProtectedRoute({
           </div>
 
           <h1 className="mt-5 text-xl font-black text-slate-900">
-            Access Verification Failed
+            Access
+            Verification Failed
           </h1>
 
           <p className="mt-2 text-sm leading-6 text-slate-600">
@@ -514,7 +843,8 @@ function ProtectedRoute({
               loadProfile(
                 session.user.id,
                 {
-                  showLoader: true,
+                  showLoader:
+                    true,
                 }
               )
             }
@@ -557,7 +887,9 @@ function ProtectedRoute({
   */
 
   const normalizedRole =
-    normalizeValue(profile.role);
+    normalizeValue(
+      profile.role
+    );
 
   const isAllowed =
     normalizedAllowedRoles.includes(
@@ -569,7 +901,10 @@ function ProtectedRoute({
       <Navigate
         to={getRoleDashboard(
           profile.role,
-          isTreasurer
+          {
+            isTreasurer,
+            isGuidance,
+          }
         )}
         replace
       />
@@ -581,34 +916,133 @@ function ProtectedRoute({
   | PORTAL AUTHORIZATION
   |--------------------------------------------------------------------------
   |
-  | Both Treasurer and normal teachers/officers use the database role
-  | "Approver". Their active office assignment determines which portal
+  | Treasurer, Guidance Counselor and normal teacher/office approvers all
+  | use the database role "Approver".
+  |
+  | Their active office assignment determines which specialized portal
   | they are allowed to access.
   |--------------------------------------------------------------------------
   */
 
   if (
-    normalizedRole === "approver"
+    normalizedRole ===
+    "approver"
   ) {
+    /*
+    |--------------------------------------------------------------------------
+    | TREASURER PORTAL
+    |--------------------------------------------------------------------------
+    */
+
     if (
-      portal === "treasurer" &&
+      portal ===
+        "treasurer" &&
       !isTreasurer
     ) {
       return (
         <Navigate
-          to="/approver/dashboard"
+          to={getRoleDashboard(
+            profile.role,
+            {
+              isTreasurer,
+              isGuidance,
+            }
+          )}
           replace
         />
       );
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | GUIDANCE PORTAL
+    |--------------------------------------------------------------------------
+    */
+
     if (
-      portal === "approver" &&
+      portal ===
+        "guidance" &&
+      !isGuidance
+    ) {
+      return (
+        <Navigate
+          to={getRoleDashboard(
+            profile.role,
+            {
+              isTreasurer,
+              isGuidance,
+            }
+          )}
+          replace
+        />
+      );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | REGULAR APPROVER PORTAL
+    |--------------------------------------------------------------------------
+    |
+    | Specialized Treasurer and Guidance accounts should not enter the
+    | normal teacher/office approver portal.
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+      portal ===
+        "approver" &&
+      (
+        isTreasurer ||
+        isGuidance
+      )
+    ) {
+      return (
+        <Navigate
+          to={getRoleDashboard(
+            profile.role,
+            {
+              isTreasurer,
+              isGuidance,
+            }
+          )}
+          replace
+        />
+      );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | PREVENT TREASURER FROM GUIDANCE PORTAL
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+      portal ===
+        "guidance" &&
       isTreasurer
     ) {
       return (
         <Navigate
           to="/treasurer/dashboard"
+          replace
+        />
+      );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | PREVENT GUIDANCE FROM TREASURER PORTAL
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+      portal ===
+        "treasurer" &&
+      isGuidance
+    ) {
+      return (
+        <Navigate
+          to="/guidance/dashboard"
           replace
         />
       );

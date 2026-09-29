@@ -16,6 +16,13 @@ import { supabase } from "../../services/supabase";
 import { sendClearancePassEmail } from "../../services/clearancePassEmailService";
 
 import {
+  uploadGuidanceAttachment,
+  getGuidanceAttachmentsWithUrls,
+  deleteGuidanceAttachment,
+  formatGuidanceAttachmentSize,
+} from "../../services/guidanceService";
+
+import {
   FaBook,
   FaBuilding,
   FaCheckCircle,
@@ -54,6 +61,8 @@ const DEFAULT_ALLOWED_FILE_TYPES = [
 
 const DEFAULT_FILE_ACCEPT =
   ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
+
+const GUIDANCE_OFFICE_CODE = "GUI";
 
 /*
 |--------------------------------------------------------------------------
@@ -400,6 +409,185 @@ const getStepWorkflowRank = (
   }
 
   return 4;
+};
+
+const isGuidanceStep = (step) => {
+  return (
+    !step?.subject_id &&
+    String(step?.offices?.office_code || "")
+      .trim()
+      .toUpperCase() === GUIDANCE_OFFICE_CODE
+  );
+};
+
+const getGuidanceDisplayStatus = (step) => {
+  const assignment = step?.guidanceAssignment;
+
+  if (
+    step?.status === "Approved" ||
+    assignment?.guidance_status === "Approved"
+  ) {
+    return "Approved";
+  }
+
+  if (!assignment) return "Waiting for Schedule";
+
+  if (assignment.guidance_status === "Needs Follow-up") {
+    return "Needs Follow-up";
+  }
+
+  if (
+    assignment.guidance_status === "For Review" ||
+    assignment.guidance_status === "Answered"
+  ) {
+    return "For Guidance Review";
+  }
+
+  const scheduleState = getGuidanceScheduleState(assignment?.batch);
+
+  if (scheduleState === "open") return "Session Open";
+  if (scheduleState === "ended") return "Session Ended";
+  if (scheduleState === "cancelled") return "Schedule Cancelled";
+  if (scheduleState === "closed") return "Session Closed";
+  if (scheduleState === "completed") return "Batch Completed";
+  if (scheduleState === "upcoming") return "Scheduled";
+
+  return "Waiting for Guidance to Open";
+};
+
+const getGuidanceStatusStyle = (step) => {
+  const status = getGuidanceDisplayStatus(step);
+
+  if (status === "Approved") return "bg-green-100 text-green-700";
+  if (status === "Needs Follow-up") return "bg-red-100 text-red-700";
+  if (status === "For Guidance Review") return "bg-blue-100 text-blue-700";
+  if (status === "Session Open") return "bg-emerald-100 text-emerald-700";
+  if (status === "Session Ended" || status === "Schedule Cancelled" || status === "Session Closed") return "bg-red-100 text-red-700";
+
+  return "bg-amber-100 text-amber-700";
+};
+
+const formatGuidanceSchedule = (batch) => {
+  if (!batch?.schedule_date) {
+    return "Schedule will be announced by Guidance.";
+  }
+
+  const date = new Date(`${batch.schedule_date}T00:00:00`);
+
+  const dateText = Number.isNaN(date.getTime())
+    ? batch.schedule_date
+    : date.toLocaleDateString("en-PH", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+
+  const formatTime = (value) => {
+    if (!value) return null;
+
+    const [hours, minutes] = String(value).split(":").map(Number);
+
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+      return value;
+    }
+
+    const time = new Date();
+    time.setHours(hours, minutes, 0, 0);
+
+    return time.toLocaleTimeString("en-PH", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  const start = formatTime(batch.start_time);
+  const end = formatTime(batch.end_time);
+
+  return [
+    dateText,
+    start && end ? `${start} – ${end}` : start || end,
+  ]
+    .filter(Boolean)
+    .join(" • ");
+};
+
+const getGuidanceScheduleState = (batch) => {
+  if (!batch?.schedule_date || !batch?.start_time || !batch?.end_time) {
+    return "unscheduled";
+  }
+
+  if (batch.status === "Cancelled") return "cancelled";
+  if (batch.status === "Completed") return "completed";
+  if (batch.status === "Closed") return "closed";
+  if (batch.status === "Draft") return "draft";
+
+  const start = new Date(`${batch.schedule_date}T${batch.start_time}+08:00`);
+  const end = new Date(`${batch.schedule_date}T${batch.end_time}+08:00`);
+  const now = new Date();
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return "unscheduled";
+  }
+
+  if (now < start) return "upcoming";
+  if (now > end) return "ended";
+
+  return batch.status === "Open" ? "open" : "not-open";
+};
+
+const getGuidanceScheduleMessage = (batch) => {
+  const state = getGuidanceScheduleState(batch);
+
+  if (state === "upcoming") {
+    return {
+      title: "Scheduled Guidance Session",
+      message: `Your response will open during your scheduled session: ${formatGuidanceSchedule(batch)}.`,
+    };
+  }
+
+  if (state === "ended") {
+    return {
+      title: "Guidance Session Ended",
+      message: `The response window ended on ${formatGuidanceSchedule(batch)}. Contact Guidance if you need another schedule or an extension.`,
+    };
+  }
+
+  if (state === "closed") {
+    return {
+      title: "Guidance Session Closed",
+      message: "Guidance has manually closed this batch for responses.",
+    };
+  }
+
+  if (state === "cancelled") {
+    return {
+      title: "Guidance Schedule Cancelled",
+      message: "This Guidance schedule has been cancelled. Wait for Guidance to assign a new schedule.",
+    };
+  }
+
+  if (state === "completed") {
+    return {
+      title: "Guidance Batch Completed",
+      message: "This Guidance batch has already been completed.",
+    };
+  }
+
+  if (state === "draft" || state === "not-open") {
+    return {
+      title: "Waiting for Guidance to Open",
+      message: "Your batch is assigned, but Guidance has not opened it for student responses.",
+    };
+  }
+
+  if (state === "unscheduled") {
+    return {
+      title: "Schedule Not Available",
+      message: "Guidance has not provided a complete date and time for this batch yet.",
+    };
+  }
+
+  return null;
 };
 
 const normalizeFileType = (
@@ -788,6 +976,40 @@ function RequestClearance() {
   const [
     submittingStepId,
     setSubmittingStepId,
+  ] = useState(null);
+  const [
+    selectedGuidanceStep,
+    setSelectedGuidanceStep,
+  ] = useState(null);
+
+  const [
+    guidanceResponse,
+    setGuidanceResponse,
+  ] = useState("");
+
+  const [
+    submittingGuidance,
+    setSubmittingGuidance,
+  ] = useState(false);
+
+  const [
+    guidanceAttachments,
+    setGuidanceAttachments,
+  ] = useState([]);
+
+  const [
+    loadingGuidanceAttachments,
+    setLoadingGuidanceAttachments,
+  ] = useState(false);
+
+  const [
+    uploadingGuidanceAttachment,
+    setUploadingGuidanceAttachment,
+  ] = useState(false);
+
+  const [
+    deletingGuidanceAttachmentId,
+    setDeletingGuidanceAttachmentId,
   ] = useState(null);
 
   const [
@@ -1847,6 +2069,76 @@ function RequestClearance() {
 
         /*
         |--------------------------------------------------------------------------
+        | LOAD GUIDANCE SCHEDULE / BATCH ASSIGNMENTS
+        |--------------------------------------------------------------------------
+        */
+
+        const guidanceSteps = enrichedSteps.filter(isGuidanceStep);
+        let finalSteps = enrichedSteps;
+
+        if (guidanceSteps.length > 0) {
+          const guidanceStepIds = guidanceSteps.map((step) => step.id);
+
+          const {
+            data: guidanceAssignmentData,
+            error: guidanceAssignmentError,
+          } = await supabase
+            .from("guidance_batch_students")
+            .select(`
+              id,
+              batch_id,
+              clearance_step_id,
+              student_id,
+              response,
+              response_submitted_at,
+              guidance_status,
+              guidance_remarks,
+              reviewed_at,
+              guidance_batches (
+                id,
+                batch_name,
+                school_year,
+                semester,
+                schedule_date,
+                start_time,
+                end_time,
+                question,
+                instructions,
+                max_students,
+                status
+              )
+            `)
+            .in("clearance_step_id", guidanceStepIds);
+
+          if (guidanceAssignmentError) {
+            console.warn(
+              "Guidance schedule could not be loaded:",
+              guidanceAssignmentError
+            );
+          } else {
+            const guidanceMap = new Map(
+              (guidanceAssignmentData || []).map((assignment) => [
+                assignment.clearance_step_id,
+                {
+                  ...assignment,
+                  batch: assignment.guidance_batches || null,
+                },
+              ])
+            );
+
+            finalSteps = enrichedSteps.map((step) =>
+              isGuidanceStep(step)
+                ? {
+                    ...step,
+                    guidanceAssignment: guidanceMap.get(step.id) || null,
+                  }
+                : step
+            );
+          }
+        }
+
+        /*
+        |--------------------------------------------------------------------------
         | DEVELOPMENT WARNING
         |--------------------------------------------------------------------------
         */
@@ -1860,7 +2152,7 @@ function RequestClearance() {
         }
 
         setSteps(
-          enrichedSteps
+          finalSteps
         );
       } catch (error) {
         console.error(
@@ -2795,6 +3087,331 @@ function RequestClearance() {
         );
       }
     };
+
+  /*
+  |--------------------------------------------------------------------------
+  | GUIDANCE RESPONSE
+  |--------------------------------------------------------------------------
+  */
+
+  const loadGuidanceAttachments = async (batchStudentId) => {
+    if (!batchStudentId) {
+      setGuidanceAttachments([]);
+      return;
+    }
+
+    try {
+      setLoadingGuidanceAttachments(true);
+
+      const result = await getGuidanceAttachmentsWithUrls(
+        batchStudentId
+      );
+
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      setGuidanceAttachments(result.data || []);
+    } catch (error) {
+      console.error("Load Guidance attachments error:", error);
+      setGuidanceAttachments([]);
+
+      await Swal.fire({
+        icon: "error",
+        title: "Attachments Could Not Be Loaded",
+        text:
+          error?.message ||
+          "Unable to load your Guidance attachments.",
+      });
+    } finally {
+      setLoadingGuidanceAttachments(false);
+    }
+  };
+
+  const openGuidanceModal = async (step) => {
+    const assignment = step?.guidanceAssignment;
+
+    if (!assignment) {
+      await Swal.fire({
+        icon: "info",
+        title: "Waiting for Guidance Schedule",
+        text: "Guidance has not assigned you to a schedule or batch yet.",
+      });
+      return;
+    }
+
+    if (
+      assignment.guidance_status === "Approved" ||
+      step.status === "Approved"
+    ) {
+      await Swal.fire({
+        icon: "info",
+        title: "Guidance Already Approved",
+        text: "Your Guidance clearance has already been approved.",
+      });
+      return;
+    }
+
+    if (assignment.guidance_status === "For Review") {
+      await Swal.fire({
+        icon: "info",
+        title: "Waiting for Guidance Review",
+        text: "Your response and attachments are locked while Guidance reviews your submission.",
+      });
+      return;
+    }
+
+    const scheduleState = getGuidanceScheduleState(assignment?.batch);
+
+    if (scheduleState !== "open") {
+      const scheduleMessage = getGuidanceScheduleMessage(assignment?.batch);
+
+      await Swal.fire({
+        icon: scheduleState === "ended" ? "warning" : "info",
+        title: scheduleMessage?.title || "Guidance Response Not Open",
+        text:
+          scheduleMessage?.message ||
+          "Your Guidance response window is not currently open.",
+      });
+      return;
+    }
+
+    setSelectedGuidanceStep(step);
+    setGuidanceResponse(assignment.response || "");
+    setGuidanceAttachments([]);
+
+    await loadGuidanceAttachments(assignment.id);
+  };
+
+  const closeGuidanceModal = () => {
+    if (submittingGuidance || uploadingGuidanceAttachment) return;
+
+    setSelectedGuidanceStep(null);
+    setGuidanceResponse("");
+    setGuidanceAttachments([]);
+  };
+
+  const handleGuidanceAttachmentChange = async (event) => {
+    const file = event.target.files?.[0] || null;
+    event.target.value = "";
+
+    if (!file || !selectedGuidanceStep?.guidanceAssignment?.id) {
+      return;
+    }
+
+    const allowedTypes = [
+      "image/jpeg",
+      "image/png",
+      "application/pdf",
+    ];
+
+    if (!allowedTypes.includes(file.type)) {
+      await Swal.fire({
+        icon: "warning",
+        title: "Unsupported File",
+        text: "Only JPG, PNG, and PDF files are allowed.",
+      });
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      await Swal.fire({
+        icon: "warning",
+        title: "File Too Large",
+        text: "Guidance attachments must not exceed 10 MB.",
+      });
+      return;
+    }
+
+    try {
+      setUploadingGuidanceAttachment(true);
+
+      const result = await uploadGuidanceAttachment({
+        batchStudentId:
+          selectedGuidanceStep.guidanceAssignment.id,
+        file,
+      });
+
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      await loadGuidanceAttachments(
+        selectedGuidanceStep.guidanceAssignment.id
+      );
+
+      await Swal.fire({
+        icon: "success",
+        title: "Attachment Added",
+        text: `${file.name} is ready with your Guidance response.`,
+        timer: 1500,
+        showConfirmButton: false,
+      });
+    } catch (error) {
+      console.error("Upload Guidance attachment error:", error);
+
+      await Swal.fire({
+        icon: "error",
+        title: "Upload Failed",
+        text:
+          error?.message ||
+          "Unable to upload the Guidance attachment.",
+      });
+    } finally {
+      setUploadingGuidanceAttachment(false);
+    }
+  };
+
+  const handleDeleteGuidanceAttachment = async (attachment) => {
+    if (!attachment?.id) return;
+
+    const confirmation = await Swal.fire({
+      icon: "warning",
+      title: "Remove Attachment?",
+      text: attachment.file_name || "This file will be removed.",
+      showCancelButton: true,
+      confirmButtonText: "Remove",
+      cancelButtonText: "Keep File",
+      confirmButtonColor: "#dc2626",
+    });
+
+    if (!confirmation.isConfirmed) return;
+
+    try {
+      setDeletingGuidanceAttachmentId(attachment.id);
+
+      const result = await deleteGuidanceAttachment(attachment.id);
+
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      setGuidanceAttachments((current) =>
+        current.filter((item) => item.id !== attachment.id)
+      );
+    } catch (error) {
+      console.error("Delete Guidance attachment error:", error);
+
+      await Swal.fire({
+        icon: "error",
+        title: "Unable to Remove File",
+        text:
+          error?.message ||
+          "The Guidance attachment could not be removed.",
+      });
+    } finally {
+      setDeletingGuidanceAttachmentId(null);
+    }
+  };
+
+  const handleSubmitGuidanceResponse = async () => {
+    if (!selectedGuidanceStep) return;
+
+    const assignment = selectedGuidanceStep.guidanceAssignment;
+    const cleanResponse = guidanceResponse.trim();
+
+    if (!assignment?.id) {
+      await Swal.fire({
+        icon: "error",
+        title: "Guidance Assignment Missing",
+        text: "Your Guidance schedule assignment could not be found.",
+      });
+      return;
+    }
+
+    const scheduleState = getGuidanceScheduleState(assignment?.batch);
+
+    if (scheduleState !== "open") {
+      const scheduleMessage = getGuidanceScheduleMessage(assignment?.batch);
+
+      await Swal.fire({
+        icon: scheduleState === "ended" ? "warning" : "info",
+        title: scheduleMessage?.title || "Guidance Response Not Open",
+        text:
+          scheduleMessage?.message ||
+          "Your Guidance response window is not currently open.",
+      });
+      return;
+    }
+
+    if (!cleanResponse) {
+      await Swal.fire({
+        icon: "warning",
+        title: "Response Required",
+        text: "Enter your answer or response before submitting.",
+      });
+      return;
+    }
+
+    if (uploadingGuidanceAttachment) {
+      await Swal.fire({
+        icon: "info",
+        title: "Attachment Still Uploading",
+        text: "Wait for the attachment upload to finish before submitting.",
+      });
+      return;
+    }
+
+    const confirmation = await Swal.fire({
+      icon: "question",
+      title:
+        assignment.guidance_status === "Needs Follow-up"
+          ? "Submit Follow-up Response?"
+          : "Submit Guidance Response?",
+      text:
+        guidanceAttachments.length > 0
+          ? `Your response and ${guidanceAttachments.length} attachment${
+              guidanceAttachments.length === 1 ? "" : "s"
+            } will be locked and sent to Guidance for review.`
+          : "Your response will be sent to Guidance for individual review.",
+      showCancelButton: true,
+      confirmButtonText: "Submit Response",
+      cancelButtonText: "Cancel",
+      confirmButtonColor: "#4f46e5",
+    });
+
+    if (!confirmation.isConfirmed) return;
+
+    try {
+      setSubmittingGuidance(true);
+
+      const { data, error } = await supabase.rpc(
+        "submit_guidance_response",
+        {
+          p_batch_student_id: assignment.id,
+          p_response: cleanResponse,
+        }
+      );
+
+      if (error) throw error;
+
+      await Swal.fire({
+        icon: "success",
+        title: "Guidance Response Submitted",
+        text:
+          data?.message ||
+          "Your response was sent to Guidance for individual review.",
+      });
+
+      setSelectedGuidanceStep(null);
+      setGuidanceResponse("");
+      setGuidanceAttachments([]);
+
+      await loadStudentClearance();
+    } catch (error) {
+      console.error("Submit Guidance response error:", error);
+
+      await Swal.fire({
+        icon: "error",
+        title: "Guidance Submission Failed",
+        text:
+          error?.message ||
+          "Unable to submit your Guidance response.",
+      });
+    } finally {
+      setSubmittingGuidance(false);
+    }
+  };
 
   /*
   |--------------------------------------------------------------------------
@@ -3794,28 +4411,43 @@ function RequestClearance() {
               <div className="space-y-5">
                 {organizedSteps.map(
                   (step) => {
-                    const displayedStatus =
-                      getDisplayedStepStatus(
+                    const guidanceStep =
+                      isGuidanceStep(
                         step
                       );
+
+                    const displayedStatus =
+                      guidanceStep
+                        ? getGuidanceDisplayStatus(
+                            step
+                          )
+                        : getDisplayedStepStatus(
+                            step
+                          );
 
                     const blockedReason =
-                      getSubmissionBlockedReason(
-                        step
-                      );
+                      guidanceStep
+                        ? null
+                        : getSubmissionBlockedReason(
+                            step
+                          );
 
                     const submissionWindowOpen =
-                      isSubmissionWindowOpen(
-                        step
-                      );
+                      guidanceStep
+                        ? false
+                        : isSubmissionWindowOpen(
+                            step
+                          );
 
                     const canSubmit =
+                      !guidanceStep &&
                       step.status ===
                         "Pending" &&
                       !step.submission &&
                       submissionWindowOpen;
 
                     const canResubmit =
+                      !guidanceStep &&
                       step.status ===
                         "Rejected" &&
                       submissionWindowOpen;
@@ -3875,15 +4507,185 @@ function RequestClearance() {
                           </div>
 
                           <span
-                            className={`w-full rounded-full px-4 py-2 text-center text-sm font-semibold sm:w-fit ${getDisplayedStepStatusStyle(
-                              step
-                            )}`}
+                            className={`w-full rounded-full px-4 py-2 text-center text-sm font-semibold sm:w-fit ${
+                              guidanceStep
+                                ? getGuidanceStatusStyle(
+                                    step
+                                  )
+                                : getDisplayedStepStatusStyle(
+                                    step
+                                  )
+                            }`}
                           >
                             {
                               displayedStatus
                             }
                           </span>
                         </div>
+
+                        {/* GUIDANCE WORKFLOW */}
+
+                        {guidanceStep && (
+                          <div className="mt-5 overflow-hidden rounded-xl border border-indigo-200 bg-indigo-50">
+                            <div className="border-b border-indigo-100 bg-white/70 p-4 sm:p-5">
+                              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                <div>
+                                  <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">
+                                    Guidance Clearance
+                                  </p>
+
+                                  <h4 className="mt-2 text-lg font-bold text-slate-800">
+                                    {step.guidanceAssignment?.batch?.batch_name ||
+                                      "Waiting for Guidance Schedule"}
+                                  </h4>
+
+                                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                                    {step.guidanceAssignment?.batch
+                                      ? formatGuidanceSchedule(
+                                          step.guidanceAssignment.batch
+                                        )
+                                      : "Guidance will assign your schedule or batch. No action is required from you yet."}
+                                  </p>
+
+                                  {step.guidanceAssignment?.batch && (
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                      <span className="rounded-lg bg-indigo-100 px-3 py-1.5 text-xs font-bold text-indigo-700">
+                                        Your Batch: {step.guidanceAssignment.batch.batch_name}
+                                      </span>
+
+                                      <span className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">
+                                        {step.guidanceAssignment.batch.semester} • {step.guidanceAssignment.batch.school_year}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {step.guidanceAssignment?.batch && (
+                                  <span className="w-fit rounded-full bg-indigo-100 px-3 py-2 text-xs font-bold text-indigo-700">
+                                    {getGuidanceDisplayStatus(step)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {step.guidanceAssignment?.batch && (
+                              <div className="p-4 sm:p-5">
+                                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                                  Guidance Question / Requirement
+                                </p>
+
+                                <p className="mt-2 whitespace-pre-wrap text-base font-semibold leading-7 text-slate-800">
+                                  {step.guidanceAssignment.batch.question ||
+                                    "No question has been posted."}
+                                </p>
+
+                                {step.guidanceAssignment.batch.instructions && (
+                                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                                    {step.guidanceAssignment.batch.instructions}
+                                  </p>
+                                )}
+
+                                {step.guidanceAssignment.response && (
+                                  <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                                      Your Response
+                                    </p>
+
+                                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                      {step.guidanceAssignment.response}
+                                    </p>
+
+                                    {step.guidanceAssignment
+                                      .response_submitted_at && (
+                                      <p className="mt-2 text-xs text-slate-500">
+                                        Submitted{" "}
+                                        {formatDate(
+                                          step.guidanceAssignment
+                                            .response_submitted_at
+                                        )}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+
+                                {step.guidanceAssignment.guidance_status ===
+                                  "Needs Follow-up" && (
+                                  <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4">
+                                    <div className="flex gap-3">
+                                      <FaExclamationTriangle className="mt-1 shrink-0 text-red-600" />
+
+                                      <div>
+                                        <p className="font-bold text-red-700">
+                                          Needs Follow-up
+                                        </p>
+
+                                        <p className="mt-1 text-sm leading-6 text-red-700">
+                                          {step.guidanceAssignment
+                                            .guidance_remarks ||
+                                            "Guidance requested a follow-up response."}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {!["Approved", "For Review", "Answered"].includes(
+                                  step.guidanceAssignment.guidance_status
+                                ) &&
+                                  getGuidanceScheduleState(
+                                    step.guidanceAssignment.batch
+                                  ) !== "open" && (
+                                    <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                                      <FaClock className="mt-1 shrink-0 text-amber-600" />
+
+                                      <div>
+                                        <p className="font-bold text-amber-700">
+                                          {getGuidanceScheduleMessage(
+                                            step.guidanceAssignment.batch
+                                          )?.title || "Guidance Session Not Open"}
+                                        </p>
+
+                                        <p className="mt-1 text-sm leading-6 text-amber-700">
+                                          {getGuidanceScheduleMessage(
+                                            step.guidanceAssignment.batch
+                                          )?.message ||
+                                            "Wait for your scheduled Guidance session."}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                {getGuidanceScheduleState(
+                                  step.guidanceAssignment.batch
+                                ) === "open" &&
+                                  !["For Review", "Answered", "Approved"].includes(
+                                    step.guidanceAssignment.guidance_status
+                                  ) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openGuidanceModal(step)}
+                                      className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-indigo-700 px-5 py-3 font-semibold text-white transition hover:bg-indigo-800 sm:w-auto"
+                                    >
+                                      <FaPaperPlane />
+
+                                      {step.guidanceAssignment.guidance_status ===
+                                      "Needs Follow-up"
+                                        ? "Submit Follow-up Response"
+                                        : "Answer Guidance Requirement"}
+                                    </button>
+                                  )}
+
+                                {step.guidanceAssignment.guidance_status ===
+                                  "For Review" && (
+                                  <div className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-100 px-5 py-3 text-center font-semibold text-blue-700 sm:w-fit">
+                                    <FaClock />
+                                    Waiting for Guidance Review
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {/* TEACHER SUBJECT REQUIREMENT */}
 
@@ -4119,7 +4921,8 @@ function RequestClearance() {
 
                         {/* APPROVED */}
 
-                        {step.status ===
+                        {!guidanceStep &&
+                          step.status ===
                           "Approved" && (
                           <div className="mt-5 rounded-xl border border-green-200 bg-green-50 p-4">
                             <p className="font-bold text-green-700">
@@ -4142,11 +4945,12 @@ function RequestClearance() {
 
                         {/* ACTIONS */}
 
-                        {(canSubmit ||
-                          canResubmit ||
-                          (step.status ===
-                            "Pending" &&
-                            step.submission)) && (
+                        {!guidanceStep &&
+                          (canSubmit ||
+                            canResubmit ||
+                            (step.status ===
+                              "Pending" &&
+                              step.submission)) && (
                           <div className="mt-5 grid gap-3 sm:flex sm:flex-wrap">
                             {canSubmit && (
                               <button
@@ -4200,6 +5004,246 @@ function RequestClearance() {
             )}
           </div>
         </>
+      )}
+
+      {/* GUIDANCE RESPONSE MODAL */}
+
+      {selectedGuidanceStep && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-0 sm:items-center sm:p-4">
+          <div className="max-h-[100dvh] w-full max-w-2xl overflow-y-auto overscroll-contain rounded-t-3xl bg-white shadow-2xl sm:max-h-[92dvh] sm:rounded-3xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-slate-100 bg-white p-4 sm:p-6">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wide text-indigo-700">
+                  Guidance Clearance
+                </p>
+
+                <h2 className="mt-1 text-xl font-bold text-slate-800 sm:text-2xl">
+                  {selectedGuidanceStep.guidanceAssignment?.batch?.batch_name ||
+                    "Guidance Requirement"}
+                </h2>
+
+                <p className="mt-2 text-sm text-slate-500">
+                  {formatGuidanceSchedule(
+                    selectedGuidanceStep.guidanceAssignment?.batch
+                  )}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeGuidanceModal}
+                disabled={submittingGuidance}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200 disabled:opacity-50"
+              >
+                <FaTimes />
+              </button>
+            </div>
+
+            <div className="space-y-5 p-4 sm:p-6">
+              <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 sm:p-5">
+                <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">
+                  Question / Requirement
+                </p>
+
+                <p className="mt-2 whitespace-pre-wrap text-base font-semibold leading-7 text-slate-800">
+                  {selectedGuidanceStep.guidanceAssignment?.batch?.question ||
+                    "No question has been posted."}
+                </p>
+
+                {selectedGuidanceStep.guidanceAssignment?.batch
+                  ?.instructions && (
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                    {
+                      selectedGuidanceStep.guidanceAssignment.batch
+                        .instructions
+                    }
+                  </p>
+                )}
+              </div>
+
+              {selectedGuidanceStep.guidanceAssignment?.guidance_status ===
+                "Needs Follow-up" && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+                  <p className="font-bold text-red-700">
+                    Guidance Follow-up
+                  </p>
+
+                  <p className="mt-1 text-sm leading-6 text-red-700">
+                    {selectedGuidanceStep.guidanceAssignment
+                      ?.guidance_remarks ||
+                      "Guidance requested an updated response."}
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="mb-2 block text-sm font-bold text-slate-700">
+                  Your Response
+                </label>
+
+                <textarea
+                  value={guidanceResponse}
+                  onChange={(event) =>
+                    setGuidanceResponse(event.target.value)
+                  }
+                  rows={6}
+                  placeholder="Type your response here..."
+                  className="w-full resize-y rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
+                />
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="flex items-center gap-2 text-sm font-bold text-slate-800">
+                      <FaUpload className="text-indigo-600" />
+                      Supporting Attachment
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Optional supporting evidence. JPG, PNG, or PDF only, up to 10 MB per file.
+                    </p>
+                  </div>
+
+                  <label
+                    htmlFor="guidanceAttachment"
+                    className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition ${
+                      uploadingGuidanceAttachment
+                        ? "cursor-not-allowed bg-slate-200 text-slate-500"
+                        : "cursor-pointer bg-indigo-600 text-white hover:bg-indigo-700"
+                    }`}
+                  >
+                    {uploadingGuidanceAttachment ? (
+                      <>
+                        <FaSyncAlt className="animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <FaUpload />
+                        Add File
+                      </>
+                    )}
+
+                    <input
+                      id="guidanceAttachment"
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+                      onChange={handleGuidanceAttachmentChange}
+                      disabled={
+                        uploadingGuidanceAttachment ||
+                        submittingGuidance
+                      }
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {loadingGuidanceAttachments ? (
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                      <FaSyncAlt className="animate-spin text-indigo-600" />
+                      Loading attachments...
+                    </div>
+                  ) : guidanceAttachments.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-4 text-center">
+                      <FaFileAlt className="mx-auto text-xl text-slate-300" />
+                      <p className="mt-2 text-xs font-semibold text-slate-500">
+                        No attachment added
+                      </p>
+                    </div>
+                  ) : (
+                    guidanceAttachments.map((attachment) => (
+                      <div
+                        key={attachment.id}
+                        className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3"
+                      >
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                          <FaFileAlt />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-bold text-slate-700">
+                            {attachment.file_name}
+                          </p>
+                          <p className="mt-0.5 text-xs text-slate-400">
+                            {formatGuidanceAttachmentSize(attachment.file_size)}
+                          </p>
+                        </div>
+
+                        {attachment.signedUrl && (
+                          <a
+                            href={attachment.signedUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-indigo-600 transition hover:bg-indigo-50"
+                            title="Open attachment"
+                          >
+                            <FaEye />
+                          </a>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDeleteGuidanceAttachment(attachment)
+                          }
+                          disabled={
+                            deletingGuidanceAttachmentId === attachment.id ||
+                            submittingGuidance ||
+                            uploadingGuidanceAttachment
+                          }
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-red-500 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Remove attachment"
+                        >
+                          {deletingGuidanceAttachmentId === attachment.id ? (
+                            <FaSyncAlt className="animate-spin" />
+                          ) : (
+                            <FaTimes />
+                          )}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="mt-3 flex items-start gap-2 rounded-xl bg-indigo-50 px-3 py-2.5 text-xs leading-5 text-indigo-700">
+                  <FaShieldAlt className="mt-0.5 shrink-0" />
+                  Files are stored privately and become locked after you submit your response for Guidance review.
+                </div>
+              </div>
+
+              <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={closeGuidanceModal}
+                  disabled={submittingGuidance}
+                  className="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSubmitGuidanceResponse}
+                  disabled={submittingGuidance || uploadingGuidanceAttachment}
+                  className="flex items-center justify-center gap-2 rounded-xl bg-indigo-700 px-5 py-3 font-semibold text-white transition hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {submittingGuidance ? (
+                    <>
+                      <FaSyncAlt className="animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    <>
+                      <FaPaperPlane />
+                      Submit to Guidance
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* SUBMISSION MODAL */}

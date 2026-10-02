@@ -10,7 +10,9 @@ import smartClearLogo from "../../assets/smartclear-logo.png";
 
 import {
   FaBell,
-  FaGraduationCap,
+  FaCalendarAlt,
+  FaCheckCircle,
+  FaClipboardCheck,
   FaHome,
   FaSignOutAlt,
   FaUser,
@@ -19,17 +21,33 @@ import {
 function Sidebar() {
   const navigate = useNavigate();
 
-  const menuItems = [
+  const workspaceItems = [
     {
-      name: "Dashboard",
+      name: "Overview",
       path: "/treasurer/dashboard",
       icon: <FaHome />,
     },
     {
-      name: "Ready for Enrollment",
-      path: "/treasurer/ready-for-enrollment",
-      icon: <FaGraduationCap />,
+      name: "Schedule & Batches",
+      path: "/treasurer/schedule",
+      icon: <FaCalendarAlt />,
     },
+    {
+      name: "Student Review",
+      path: "/treasurer/review",
+      icon: <FaClipboardCheck />,
+    },
+  ];
+
+  const clearanceItems = [
+    {
+      name: "Reviewed Students",
+      path: "/treasurer/reviewed",
+      icon: <FaCheckCircle />,
+    },
+  ];
+
+  const accountItems = [
     {
       name: "Notifications",
       path: "/treasurer/notifications",
@@ -41,6 +59,30 @@ function Sidebar() {
       icon: <FaUser />,
     },
   ];
+
+  const renderMenu = (items) =>
+    items.map((item) => (
+      <li key={item.name}>
+        <NavLink
+          to={item.path}
+          className={({ isActive }) =>
+            `group flex items-center gap-4 rounded-xl px-4 py-3 transition-all duration-200 ${
+              isActive
+                ? "bg-white font-semibold text-blue-900 shadow-md"
+                : "text-blue-50 hover:bg-blue-800"
+            }`
+          }
+        >
+          <span className="shrink-0 text-lg transition-transform duration-200 group-hover:scale-110">
+            {item.icon}
+          </span>
+
+          <span className="min-w-0 truncate">
+            {item.name}
+          </span>
+        </NavLink>
+      </li>
+    ));
 
   const handleLogout = async () => {
     const result = await Swal.fire({
@@ -108,39 +150,57 @@ function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-6">
-        <ul className="space-y-2">
-          {menuItems.map((item) => (
-            <li key={item.name}>
-              <NavLink
-                to={item.path}
-                className={({ isActive }) =>
-                  `flex items-center gap-4 rounded-xl px-4 py-3 transition-all ${
-                    isActive
-                      ? "bg-white font-semibold text-blue-900 shadow-md"
-                      : "text-blue-50 hover:bg-blue-800"
-                  }`
-                }
-              >
-                <span className="shrink-0 text-xl">
-                  {item.icon}
-                </span>
+      <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5">
+        {/* Workspace */}
+        <div>
+          <p className="mb-2 px-4 text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300">
+            Workspace
+          </p>
 
-                <span className="min-w-0 truncate">
-                  {item.name}
-                </span>
-              </NavLink>
-            </li>
-          ))}
-        </ul>
+          <ul className="space-y-1.5">
+            {renderMenu(workspaceItems)}
+          </ul>
+        </div>
+
+        {/* Clearance */}
+        <div className="mt-7">
+          <p className="mb-2 px-4 text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300">
+            Clearance
+          </p>
+
+          <ul className="space-y-1.5">
+            {renderMenu(clearanceItems)}
+          </ul>
+        </div>
+
+        {/* Account */}
+        <div className="mt-7">
+          <p className="mb-2 px-4 text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300">
+            Account
+          </p>
+
+          <ul className="space-y-1.5">
+            {renderMenu(accountItems)}
+          </ul>
+        </div>
       </nav>
 
-      {/* Logout */}
+      {/* Footer / Logout */}
       <div className="shrink-0 border-t border-blue-800 bg-blue-900 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="mb-3 rounded-xl border border-blue-700/70 bg-blue-800/40 px-4 py-3">
+          <p className="text-xs font-semibold text-blue-300">
+            Financial Clearance
+          </p>
+
+          <p className="mt-1 text-xs leading-5 text-blue-100">
+            Schedule students and verify requirements during face-to-face review.
+          </p>
+        </div>
+
         <button
           type="button"
           onClick={handleLogout}
-          className="flex min-h-12 w-full items-center gap-4 rounded-xl px-4 py-3 transition hover:bg-red-600"
+          className="flex min-h-12 w-full items-center gap-4 rounded-xl px-4 py-3 font-semibold transition duration-200 hover:bg-red-600"
         >
           <FaSignOutAlt className="shrink-0" />
 

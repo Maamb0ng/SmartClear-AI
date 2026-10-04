@@ -345,6 +345,7 @@ function UserManagement() {
     year_level: "",
     block: "",
     student_type: "Regular",
+    approver_type: "",
     office: "",
   });
 
@@ -971,6 +972,7 @@ function UserManagement() {
               user.student_id,
               user.employee_id,
               user.role,
+              user.approver_type,
               user.department,
               user.course,
               user.year_level,
@@ -1008,6 +1010,47 @@ function UserManagement() {
             user
           )
         : null;
+
+    const isApprover =
+      getUserGroup(
+        user
+      ) === "approvers";
+
+    if (
+      isApprover &&
+      ![
+        "Faculty",
+        "Office",
+      ].includes(
+        user.approver_type
+      )
+    ) {
+      await Swal.fire({
+        icon: "warning",
+        title:
+          "Set Approver Type First",
+        text:
+          "Edit this account and classify it as Faculty or Office Staff before activation.",
+        confirmButtonText:
+          "Edit Account",
+        showCancelButton:
+          true,
+        cancelButtonText:
+          "Close",
+        confirmButtonColor:
+          "#2563eb",
+      }).then(
+        (result) => {
+          if (
+            result.isConfirmed
+          ) {
+            handleEdit(user);
+          }
+        }
+      );
+
+      return;
+    }
 
     if (
       isStudent &&
@@ -1398,6 +1441,9 @@ function UserManagement() {
         getStudentBlock(user),
       student_type:
         getStudentType(user),
+      approver_type:
+        user.approver_type ||
+        "",
       office:
         user.office ||
         "",
@@ -1460,18 +1506,52 @@ function UserManagement() {
       return;
     }
 
+    if (
+      editGroup ===
+        "approvers" &&
+      ![
+        "Faculty",
+        "Office",
+      ].includes(
+        editData.approver_type
+      )
+    ) {
+      await Swal.fire({
+        icon:
+          "warning",
+        title:
+          "Approver Type Required",
+        text:
+          "Choose whether this approver is Faculty or Office Staff before saving.",
+        confirmButtonColor:
+          "#2563eb",
+      });
+
+      return;
+    }
+
     try {
       setSavingEdit(
         true
       );
 
+      const updates = {
+        ...editData,
+        full_name:
+          editData.full_name.trim(),
+      };
+
+      if (
+        editGroup !==
+        "approvers"
+      ) {
+        updates.approver_type =
+          null;
+      }
+
       await updateUser(
         editingUser.id,
-        {
-          ...editData,
-          full_name:
-            editData.full_name.trim(),
-        }
+        updates
       );
 
       setEditingUser(
@@ -2219,6 +2299,18 @@ function UserManagement() {
                                     </span>
 
                                     {group ===
+                                      "approvers" &&
+                                      user.approver_type && (
+                                      <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] text-violet-700">
+                                        <FaIdBadge />
+                                        {user.approver_type ===
+                                        "Office"
+                                          ? "Office Staff"
+                                          : user.approver_type}
+                                      </span>
+                                    )}
+
+                                    {group ===
                                       "students" && (
                                       <span
                                         className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] ${getStudentTypeClasses(
@@ -2355,6 +2447,16 @@ function UserManagement() {
                                     {user.office ||
                                       user.department ||
                                       "Assignment not set"}
+                                  </div>
+
+                                  <div className="mt-2 flex items-center gap-2 text-xs font-bold text-violet-700">
+                                    <FaIdBadge />
+
+                                    {user.approver_type ===
+                                    "Office"
+                                      ? "Office Staff"
+                                      : user.approver_type ||
+                                        "Approver type not set"}
                                   </div>
 
                                   <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
@@ -3100,6 +3202,40 @@ function UserManagement() {
                     {editGroup ===
                       "approvers" && (
                       <>
+                        <label className="block md:col-span-2">
+                          <span className="mb-2 block text-sm font-bold text-slate-700">
+                            Approver Type
+                          </span>
+
+                          <select
+                            name="approver_type"
+                            value={
+                              editData.approver_type
+                            }
+                            onChange={
+                              handleEditChange
+                            }
+                            className="h-12 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+                            required
+                          >
+                            <option value="">
+                              Select Approver Type
+                            </option>
+
+                            <option value="Faculty">
+                              Faculty
+                            </option>
+
+                            <option value="Office">
+                              Office Staff
+                            </option>
+                          </select>
+
+                          <p className="mt-2 text-xs leading-5 text-slate-500">
+                            Faculty uses the faculty approver portal. Office Staff uses the office portal unless the account has a specialized Guidance or Treasurer assignment.
+                          </p>
+                        </label>
+
                         <label className="block">
                           <span className="mb-2 block text-sm font-bold text-slate-700">
                             Department
@@ -3164,9 +3300,7 @@ function UserManagement() {
                   </div>
 
                   <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-xs leading-5 text-blue-700">
-                    Students and approvers are visually separated here, but the
-                    existing user service functions and database structure are
-                    preserved.
+                    Approver Type controls portal classification only. Office and class assignments remain managed through their existing assignment workflows.
                   </div>
 
                   <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">

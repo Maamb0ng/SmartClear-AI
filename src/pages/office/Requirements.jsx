@@ -1,254 +1,764 @@
-import { useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
 import {
   FaCheck,
   FaClipboardList,
   FaEdit,
   FaExclamationCircle,
+  FaExclamationTriangle,
   FaPlus,
   FaQuestionCircle,
+  FaRedo,
   FaSearch,
+  FaSpinner,
   FaTimes,
   FaToggleOff,
   FaToggleOn,
   FaTrash,
 } from "react-icons/fa";
 
+import Swal from "sweetalert2";
+
 import OfficeStaffLayout from "../../layouts/OfficeStaffLayout";
 
+import {
+  createOfficeRequirement,
+  deleteOfficeRequirement,
+  getOfficeRequirements,
+  getOfficeStaffContext,
+  setOfficeRequirementStatus,
+  updateOfficeRequirement,
+} from "../../services/officeStaffService";
+
 function Requirements() {
-  // =========================================================
-  // MOCK OFFICE
-  // Later: logged-in user's assigned office from Supabase.
-  // =========================================================
-
-  const office = {
-    name: "Library",
-    code: "LIB",
-  };
-
-  // =========================================================
-  // MOCK REQUIREMENTS
-  // Later: loaded from office requirements table.
-  // =========================================================
-
-  const [requirements, setRequirements] = useState([
-    {
-      id: "req-001",
-      type: "Requirement",
-      title: "No outstanding borrowed books",
-      description:
-        "Verify that the student has returned all borrowed library materials.",
-      active: true,
-    },
-    {
-      id: "req-002",
-      type: "Requirement",
-      title: "No unpaid or lost books",
-      description:
-        "Verify that the student has no unresolved lost or unpaid library materials.",
-      active: true,
-    },
-    {
-      id: "req-003",
-      type: "Question",
-      title:
-        "Does the student have an unresolved library obligation?",
-      description:
-        "Use this question when additional confirmation is needed during review.",
-      active: true,
-    },
-  ]);
+  /*
+  =========================================================
+  STATE
+  =========================================================
+  */
 
   const emptyForm = {
     type: "Requirement",
     title: "",
     description: "",
     active: true,
+    required: false,
   };
 
-  const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] =
-    useState("All");
+  const [office, setOffice] =
+    useState(null);
 
-  const [showForm, setShowForm] =
+  const [
+    requirements,
+    setRequirements,
+  ] = useState([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [saving, setSaving] =
     useState(false);
 
-  const [editingItem, setEditingItem] =
-    useState(null);
+  const [error, setError] =
+    useState("");
 
-  const [formData, setFormData] =
-    useState(emptyForm);
+  const [search, setSearch] =
+    useState("");
 
-  const [deleteItem, setDeleteItem] =
-    useState(null);
+  const [
+    typeFilter,
+    setTypeFilter,
+  ] = useState("All");
 
-  // =========================================================
-  // FILTERS / STATS
-  // =========================================================
+  const [
+    showForm,
+    setShowForm,
+  ] = useState(false);
 
-  const filteredRequirements = useMemo(() => {
-    const query = search.trim().toLowerCase();
+  const [
+    editingItem,
+    setEditingItem,
+  ] = useState(null);
 
-    return requirements.filter((item) => {
-      const matchesSearch =
-        !query ||
-        item.title
-          .toLowerCase()
-          .includes(query) ||
-        item.description
-          .toLowerCase()
-          .includes(query);
+  const [
+    formData,
+    setFormData,
+  ] = useState(emptyForm);
 
-      const matchesType =
-        typeFilter === "All" ||
-        item.type === typeFilter;
+  const [
+    deleteItem,
+    setDeleteItem,
+  ] = useState(null);
 
-      return matchesSearch && matchesType;
-    });
-  }, [requirements, search, typeFilter]);
+  /*
+  =========================================================
+  LOAD REQUIREMENTS
+  =========================================================
+  */
 
-  const stats = useMemo(() => {
-    return {
-      total: requirements.length,
+  const loadRequirements =
+    async () => {
+      try {
+        setLoading(true);
+        setError("");
 
-      requirements: requirements.filter(
-        (item) =>
-          item.type === "Requirement"
-      ).length,
+        const context =
+          await getOfficeStaffContext();
 
-      questions: requirements.filter(
-        (item) => item.type === "Question"
-      ).length,
+        const primaryOffice =
+          context.primaryOffice;
 
-      active: requirements.filter(
-        (item) => item.active
-      ).length,
+        if (!primaryOffice) {
+          setOffice(null);
+          setRequirements([]);
+
+          throw new Error(
+            "No active office assignment was found for this Office Staff account."
+          );
+        }
+
+        setOffice({
+          id:
+            primaryOffice.id,
+
+          name:
+            primaryOffice.office_name ||
+            "Office",
+
+          code:
+            primaryOffice.office_code ||
+            "OFFICE",
+        });
+
+        const data =
+          await getOfficeRequirements(
+            primaryOffice.id,
+            {
+              includeInactive: true,
+            }
+          );
+
+        const mapped = (
+  data?.requirements || []
+).map(
+          (item) => ({
+            id:
+              item.id,
+
+            officeId:
+              item.office_id,
+
+            type:
+              item.requirement_type ||
+              "Requirement",
+
+            title:
+              item.title ||
+              "",
+
+            description:
+              item.description ||
+              "",
+
+            responseType:
+              item.response_type ||
+              (item.requirement_type ===
+              "Question"
+                ? "yes-no"
+                : "check"),
+
+            required:
+              item.is_required ===
+              true,
+
+            active:
+              item.is_active !==
+              false,
+
+            createdAt:
+              item.created_at,
+
+            updatedAt:
+              item.updated_at,
+          })
+        );
+
+        setRequirements(
+          mapped
+        );
+      } catch (err) {
+        console.error(
+          "Failed to load office requirements:",
+          err
+        );
+
+        setError(
+          err?.message ||
+            "Unable to load office requirements."
+        );
+      } finally {
+        setLoading(false);
+      }
     };
-  }, [requirements]);
 
-  // =========================================================
-  // FORM
-  // =========================================================
+  useEffect(() => {
+    loadRequirements();
+  }, []);
+
+  /*
+  =========================================================
+  FILTERS
+  =========================================================
+  */
+
+  const filteredRequirements =
+    useMemo(() => {
+      const query =
+        search
+          .trim()
+          .toLowerCase();
+
+      return requirements.filter(
+        (item) => {
+          const title =
+            String(
+              item.title || ""
+            ).toLowerCase();
+
+          const description =
+            String(
+              item.description ||
+                ""
+            ).toLowerCase();
+
+          const matchesSearch =
+            !query ||
+            title.includes(
+              query
+            ) ||
+            description.includes(
+              query
+            );
+
+          const matchesType =
+            typeFilter ===
+              "All" ||
+            item.type ===
+              typeFilter;
+
+          return (
+            matchesSearch &&
+            matchesType
+          );
+        }
+      );
+    }, [
+      requirements,
+      search,
+      typeFilter,
+    ]);
+
+  /*
+  =========================================================
+  STATS
+  =========================================================
+  */
+
+  const stats = useMemo(
+    () => ({
+      total:
+        requirements.length,
+
+      requirements:
+        requirements.filter(
+          (item) =>
+            item.type ===
+            "Requirement"
+        ).length,
+
+      questions:
+        requirements.filter(
+          (item) =>
+            item.type ===
+            "Question"
+        ).length,
+
+      active:
+        requirements.filter(
+          (item) =>
+            item.active
+        ).length,
+    }),
+    [requirements]
+  );
+
+  /*
+  =========================================================
+  FORM
+  =========================================================
+  */
 
   const openCreateForm = () => {
     setEditingItem(null);
-    setFormData(emptyForm);
+
+    setFormData({
+      ...emptyForm,
+    });
+
     setShowForm(true);
   };
 
-  const openEditForm = (item) => {
+  const openEditForm = (
+    item
+  ) => {
     setEditingItem(item);
 
     setFormData({
-      type: item.type,
-      title: item.title,
-      description: item.description,
-      active: item.active,
+      type:
+        item.type,
+
+      title:
+        item.title,
+
+      description:
+        item.description ||
+        "",
+
+      active:
+        item.active,
+
+      required:
+        item.required,
     });
 
     setShowForm(true);
   };
 
   const closeForm = () => {
-    setShowForm(false);
-    setEditingItem(null);
-    setFormData(emptyForm);
-  };
-
-  const handleChange = (event) => {
-    const { name, value } = event.target;
-
-    setFormData((current) => ({
-      ...current,
-      [name]: value,
-    }));
-  };
-
-  const handleSubmit = (event) => {
-    event.preventDefault();
-
-    if (!formData.title.trim()) {
-      window.alert(
-        "Please enter a requirement or question."
-      );
+    if (saving) {
       return;
     }
 
-    if (editingItem) {
-      setRequirements((current) =>
-        current.map((item) =>
-          item.id === editingItem.id
-            ? {
-                ...item,
-                ...formData,
-              }
-            : item
-        )
-      );
-    } else {
-      const newItem = {
-        id: `requirement-${Date.now()}`,
-        ...formData,
-      };
+    setShowForm(false);
 
-      setRequirements((current) => [
-        newItem,
+    setEditingItem(null);
+
+    setFormData({
+      ...emptyForm,
+    });
+  };
+
+  const handleChange = (
+    event
+  ) => {
+    const {
+      name,
+      value,
+    } = event.target;
+
+    setFormData(
+      (current) => ({
         ...current,
-      ]);
-    }
-
-    closeForm();
-  };
-
-  // =========================================================
-  // ACTIVE / INACTIVE
-  // =========================================================
-
-  const toggleStatus = (itemId) => {
-    setRequirements((current) =>
-      current.map((item) =>
-        item.id === itemId
-          ? {
-              ...item,
-              active: !item.active,
-            }
-          : item
-      )
+        [name]: value,
+      })
     );
   };
 
-  // =========================================================
-  // DELETE
-  // =========================================================
+  /*
+  =========================================================
+  CREATE / UPDATE
+  =========================================================
+  */
 
-  const confirmDelete = () => {
-    if (!deleteItem) return;
+  const handleSubmit =
+    async (event) => {
+      event.preventDefault();
 
-    setRequirements((current) =>
-      current.filter(
-        (item) => item.id !== deleteItem.id
-      )
+      if (
+        !formData.title.trim()
+      ) {
+        await Swal.fire({
+          icon: "warning",
+
+          title:
+            "Title Required",
+
+          text:
+            "Please enter a requirement or question.",
+
+          confirmButtonText:
+            "Okay",
+        });
+
+        return;
+      }
+
+      if (!office?.id) {
+        await Swal.fire({
+          icon: "error",
+
+          title:
+            "Office Not Found",
+
+          text:
+            "No active office assignment was found.",
+
+          confirmButtonText:
+            "Okay",
+        });
+
+        return;
+      }
+
+      try {
+        setSaving(true);
+
+        if (editingItem) {
+          await updateOfficeRequirement({
+            requirementId:
+              editingItem.id,
+
+            type:
+              formData.type,
+
+            title:
+              formData.title,
+
+            description:
+              formData.description,
+
+            isRequired:
+              formData.required,
+
+            isActive:
+              formData.active,
+          });
+        } else {
+          await createOfficeRequirement({
+            officeId:
+              office.id,
+
+            type:
+              formData.type,
+
+            title:
+              formData.title,
+
+            description:
+              formData.description,
+
+            isRequired:
+              formData.required,
+
+            isActive:
+              formData.active,
+          });
+        }
+
+        setShowForm(false);
+
+        setEditingItem(
+          null
+        );
+
+        setFormData({
+          ...emptyForm,
+        });
+
+        await loadRequirements();
+
+        await Swal.fire({
+          icon: "success",
+
+          title:
+            editingItem
+              ? "Item Updated"
+              : "Item Added",
+
+          text:
+            editingItem
+              ? "The office clearance item has been updated."
+              : "The office clearance item has been created.",
+
+          timer: 1600,
+
+          showConfirmButton:
+            false,
+        });
+      } catch (err) {
+        console.error(
+          "Failed to save office requirement:",
+          err
+        );
+
+        await Swal.fire({
+          icon: "error",
+
+          title:
+            "Unable to Save",
+
+          text:
+            err?.message ||
+            "The office requirement could not be saved.",
+
+          confirmButtonText:
+            "Okay",
+        });
+      } finally {
+        setSaving(false);
+      }
+    };
+
+  /*
+  =========================================================
+  ACTIVE / INACTIVE
+  =========================================================
+  */
+
+  const toggleStatus =
+    async (item) => {
+      if (saving) {
+        return;
+      }
+
+      const nextStatus =
+        !item.active;
+
+      try {
+        setSaving(true);
+
+        await setOfficeRequirementStatus({
+          requirementId:
+            item.id,
+
+          isActive:
+            nextStatus,
+        });
+
+        setRequirements(
+          (current) =>
+            current.map(
+              (currentItem) =>
+                currentItem.id ===
+                item.id
+                  ? {
+                      ...currentItem,
+                      active:
+                        nextStatus,
+                    }
+                  : currentItem
+            )
+        );
+
+        await Swal.fire({
+          icon: "success",
+
+          title:
+            nextStatus
+              ? "Item Enabled"
+              : "Item Disabled",
+
+          text:
+            nextStatus
+              ? "This item will now appear in the office review checklist."
+              : "This item will no longer appear in new office review checklists.",
+
+          timer: 1500,
+
+          showConfirmButton:
+            false,
+        });
+      } catch (err) {
+        console.error(
+          "Failed to change requirement status:",
+          err
+        );
+
+        await Swal.fire({
+          icon: "error",
+
+          title:
+            "Unable to Update",
+
+          text:
+            err?.message ||
+            "The item status could not be changed.",
+
+          confirmButtonText:
+            "Okay",
+        });
+      } finally {
+        setSaving(false);
+      }
+    };
+
+  /*
+  =========================================================
+  DELETE
+  =========================================================
+  */
+
+  const confirmDelete =
+    async () => {
+      if (
+        !deleteItem ||
+        saving
+      ) {
+        return;
+      }
+
+      const item =
+        deleteItem;
+
+      try {
+        setSaving(true);
+
+        await deleteOfficeRequirement(
+          item.id
+        );
+
+        setRequirements(
+          (current) =>
+            current.filter(
+              (requirement) =>
+                requirement.id !==
+                item.id
+            )
+        );
+
+        setDeleteItem(null);
+
+        await Swal.fire({
+          icon: "success",
+
+          title:
+            "Item Deleted",
+
+          text:
+            "The office clearance item has been deleted.",
+
+          timer: 1500,
+
+          showConfirmButton:
+            false,
+        });
+      } catch (err) {
+        console.error(
+          "Failed to delete office requirement:",
+          err
+        );
+
+        await Swal.fire({
+          icon: "error",
+
+          title:
+            "Unable to Delete",
+
+          text:
+            err?.message ||
+            "The office requirement could not be deleted.",
+
+          confirmButtonText:
+            "Okay",
+        });
+      } finally {
+        setSaving(false);
+      }
+    };
+
+  /*
+  =========================================================
+  LOADING
+  =========================================================
+  */
+
+  if (loading) {
+    return (
+      <OfficeStaffLayout>
+        <div className="mx-auto flex min-h-[65vh] w-full max-w-[1500px] items-center justify-center">
+          <div className="text-center">
+            <FaSpinner className="mx-auto animate-spin text-3xl text-blue-600 dark:text-blue-400" />
+
+            <p className="mt-4 text-sm font-black text-slate-800 dark:text-slate-200">
+              Loading Office
+              Requirements
+            </p>
+
+            <p className="mt-1 text-xs font-medium text-slate-500">
+              Retrieving your office
+              clearance configuration.
+            </p>
+          </div>
+        </div>
+      </OfficeStaffLayout>
     );
+  }
 
-    setDeleteItem(null);
-  };
+  /*
+  =========================================================
+  ERROR
+  =========================================================
+  */
+
+  if (error && !office) {
+    return (
+      <OfficeStaffLayout>
+        <div className="mx-auto w-full max-w-[1500px]">
+          <div className="rounded-3xl border border-red-200 bg-white p-8 text-center shadow-sm dark:border-red-500/20 dark:bg-slate-900">
+            <FaExclamationTriangle className="mx-auto text-3xl text-red-500" />
+
+            <h1 className="mt-4 text-xl font-black text-slate-950 dark:text-white">
+              Unable to Load
+              Requirements
+            </h1>
+
+            <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6 text-slate-500 dark:text-slate-400">
+              {error}
+            </p>
+
+            <button
+              type="button"
+              onClick={
+                loadRequirements
+              }
+              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-blue-700"
+            >
+              <FaRedo />
+
+              Try Again
+            </button>
+          </div>
+        </div>
+      </OfficeStaffLayout>
+    );
+  }
+
+  /*
+  =========================================================
+  UI
+  =========================================================
+  */
 
   return (
     <OfficeStaffLayout>
       <div className="mx-auto w-full max-w-[1500px] space-y-6">
-        {/* ===================================================
-            HEADER
-        =================================================== */}
+        {/* HEADER */}
 
         <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-violet-700 dark:bg-violet-500/10 dark:text-violet-400">
-                {office.code}
+                {office?.code ||
+                  "OFFICE"}
               </span>
 
               <span className="text-xs font-bold text-slate-400">
-                {office.name}
+                {office?.name ||
+                  "Office"}
               </span>
             </div>
 
@@ -257,25 +767,57 @@ function Requirements() {
             </h1>
 
             <p className="mt-1 max-w-3xl text-sm font-medium leading-6 text-slate-500 dark:text-slate-400">
-              Configure the checks and questions
-              your office may use when reviewing a
+              Configure the checks and
+              questions your office may
+              use when reviewing a
               student's clearance.
             </p>
           </div>
 
           <button
             type="button"
+            disabled={saving}
             onClick={openCreateForm}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <FaPlus />
+
             Add Requirement
           </button>
         </section>
 
-        {/* ===================================================
-            INFO
-        =================================================== */}
+        {/* ERROR BANNER */}
+
+        {error && (
+          <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-500/20 dark:bg-red-500/5">
+            <div className="flex items-start gap-3">
+              <FaExclamationTriangle className="mt-0.5 shrink-0 text-red-600 dark:text-red-400" />
+
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-black text-red-900 dark:text-red-300">
+                  Some information could
+                  not be loaded
+                </p>
+
+                <p className="mt-1 text-xs font-medium leading-5 text-red-700 dark:text-red-300/80">
+                  {error}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={
+                  loadRequirements
+                }
+                className="shrink-0 rounded-lg p-2 text-red-600 transition hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-500/10"
+              >
+                <FaRedo />
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* INFO */}
 
         <section className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4 dark:border-blue-500/20 dark:bg-blue-500/5">
           <div className="flex items-start gap-3">
@@ -283,44 +825,55 @@ function Requirements() {
 
             <div>
               <p className="text-sm font-black text-blue-900 dark:text-blue-300">
-                Flexible office configuration
+                Flexible office
+                configuration
               </p>
 
               <p className="mt-1 text-xs font-medium leading-5 text-blue-700/80 dark:text-blue-300/70">
-                Requirements are not permanently
-                hardcoded. Each office can configure
-                the checks or questions relevant to
-                its own clearance process. If no
-                requirement is active, staff may
-                review and approve students directly.
+                Requirements are not
+                permanently hardcoded.
+                Each office can configure
+                the checks or questions
+                relevant to its own
+                clearance process. If no
+                requirement is active,
+                staff may review and
+                approve students
+                directly.
               </p>
             </div>
           </div>
         </section>
 
-        {/* ===================================================
-            STATS
-        =================================================== */}
+        {/* STATS */}
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Total Items"
             value={stats.total}
-            icon={FaClipboardList}
+            icon={
+              FaClipboardList
+            }
             iconClass="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
           />
 
           <StatCard
             label="Requirements"
-            value={stats.requirements}
+            value={
+              stats.requirements
+            }
             icon={FaCheck}
             iconClass="bg-violet-50 text-violet-600 dark:bg-violet-500/10 dark:text-violet-400"
           />
 
           <StatCard
             label="Questions"
-            value={stats.questions}
-            icon={FaQuestionCircle}
+            value={
+              stats.questions
+            }
+            icon={
+              FaQuestionCircle
+            }
             iconClass="bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
           />
 
@@ -332,9 +885,7 @@ function Requirements() {
           />
         </section>
 
-        {/* ===================================================
-            FILTERS
-        =================================================== */}
+        {/* FILTERS */}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col gap-3 md:flex-row">
@@ -344,8 +895,12 @@ function Requirements() {
               <input
                 type="text"
                 value={search}
-                onChange={(event) =>
-                  setSearch(event.target.value)
+                onChange={(
+                  event
+                ) =>
+                  setSearch(
+                    event.target.value
+                  )
                 }
                 placeholder="Search requirements or questions..."
                 className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm font-medium text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
@@ -354,7 +909,9 @@ function Requirements() {
 
             <select
               value={typeFilter}
-              onChange={(event) =>
+              onChange={(
+                event
+              ) =>
                 setTypeFilter(
                   event.target.value
                 )
@@ -376,9 +933,7 @@ function Requirements() {
           </div>
         </section>
 
-        {/* ===================================================
-            LIST
-        =================================================== */}
+        {/* LIST */}
 
         <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
@@ -388,8 +943,12 @@ function Requirements() {
               </h2>
 
               <p className="mt-0.5 text-xs font-medium text-slate-500">
-                {filteredRequirements.length} item
-                {filteredRequirements.length !== 1
+                {
+                  filteredRequirements.length
+                }{" "}
+                item
+                {filteredRequirements.length !==
+                1
                   ? "s"
                   : ""}
               </p>
@@ -400,39 +959,53 @@ function Requirements() {
             </div>
           </div>
 
-          {filteredRequirements.length === 0 ? (
+          {filteredRequirements.length ===
+          0 ? (
             <div className="px-5 py-16 text-center">
               <FaClipboardList className="mx-auto mb-4 text-3xl text-slate-300 dark:text-slate-600" />
 
               <h3 className="text-base font-black text-slate-800 dark:text-slate-200">
-                No requirements configured
+                {requirements.length ===
+                0
+                  ? "No requirements configured"
+                  : "No matching items"}
               </h3>
 
               <p className="mx-auto mt-1 max-w-md text-sm font-medium leading-6 text-slate-500">
-                Your office can still review
-                students directly, or you can create
-                an optional requirement or question.
+                {requirements.length ===
+                0
+                  ? "Your office can still review students directly, or you can create a requirement or question."
+                  : "Try changing your search or filter."}
               </p>
 
-              <button
-                type="button"
-                onClick={openCreateForm}
-                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
-              >
-                <FaPlus />
-                Add First Item
-              </button>
+              {requirements.length ===
+                0 && (
+                <button
+                  type="button"
+                  onClick={
+                    openCreateForm
+                  }
+                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
+                >
+                  <FaPlus />
+
+                  Add First Item
+                </button>
+              )}
             </div>
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
               {filteredRequirements.map(
                 (item) => {
                   const isQuestion =
-                    item.type === "Question";
+                    item.type ===
+                    "Question";
 
                   return (
                     <article
-                      key={item.id}
+                      key={
+                        item.id
+                      }
                       className={`p-5 transition hover:bg-slate-50/70 dark:hover:bg-slate-800/30 ${
                         !item.active
                           ? "opacity-60"
@@ -440,8 +1013,6 @@ function Requirements() {
                       }`}
                     >
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
-                        {/* ICON */}
-
                         <div
                           className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
                             isQuestion
@@ -456,8 +1027,6 @@ function Requirements() {
                           )}
                         </div>
 
-                        {/* CONTENT */}
-
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <span
@@ -467,7 +1036,9 @@ function Requirements() {
                                   : "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-400"
                               }`}
                             >
-                              {item.type}
+                              {
+                                item.type
+                              }
                             </span>
 
                             <span
@@ -481,30 +1052,53 @@ function Requirements() {
                                 ? "Active"
                                 : "Inactive"}
                             </span>
+
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${
+                                item.required
+                                  ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400"
+                                  : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                              }`}
+                            >
+                              {item.required
+                                ? "Required"
+                                : "Optional"}
+                            </span>
                           </div>
 
                           <h3 className="mt-2 text-sm font-black text-slate-900 dark:text-white">
-                            {item.title}
+                            {
+                              item.title
+                            }
                           </h3>
 
                           {item.description && (
                             <p className="mt-1 max-w-3xl text-xs font-medium leading-5 text-slate-500 dark:text-slate-400">
-                              {item.description}
+                              {
+                                item.description
+                              }
                             </p>
                           )}
-                        </div>
 
-                        {/* ACTIONS */}
+                          <p className="mt-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                            {isQuestion
+                              ? "Response: Yes / No"
+                              : "Response: Verification Check"}
+                          </p>
+                        </div>
 
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
+                            disabled={
+                              saving
+                            }
                             onClick={() =>
                               toggleStatus(
-                                item.id
+                                item
                               )
                             }
-                            className={`inline-flex items-center justify-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs font-bold transition ${
+                            className={`inline-flex items-center justify-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                               item.active
                                 ? "border-amber-200 text-amber-700 hover:bg-amber-50 dark:border-amber-500/20 dark:text-amber-400 dark:hover:bg-amber-500/10"
                                 : "border-emerald-200 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-500/20 dark:text-emerald-400 dark:hover:bg-emerald-500/10"
@@ -523,21 +1117,32 @@ function Requirements() {
 
                           <button
                             type="button"
-                            onClick={() =>
-                              openEditForm(item)
+                            disabled={
+                              saving
                             }
-                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3.5 py-2.5 text-xs font-bold text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-500/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-400"
+                            onClick={() =>
+                              openEditForm(
+                                item
+                              )
+                            }
+                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3.5 py-2.5 text-xs font-bold text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-500/30 dark:hover:bg-blue-500/10 dark:hover:text-blue-400"
                           >
                             <FaEdit />
+
                             Edit
                           </button>
 
                           <button
                             type="button"
-                            onClick={() =>
-                              setDeleteItem(item)
+                            disabled={
+                              saving
                             }
-                            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-slate-700 dark:hover:border-red-500/20 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                            onClick={() =>
+                              setDeleteItem(
+                                item
+                              )
+                            }
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:hover:border-red-500/20 dark:hover:bg-red-500/10 dark:hover:text-red-400"
                           >
                             <FaTrash />
                           </button>
@@ -551,21 +1156,20 @@ function Requirements() {
           )}
         </section>
 
-        {/* ===================================================
-            CREATE / EDIT MODAL
-        =================================================== */}
+        {/* CREATE / EDIT MODAL */}
 
         {showForm && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
             <button
               type="button"
               aria-label="Close requirement form"
+              disabled={saving}
               onClick={closeForm}
               className="absolute inset-0"
             />
 
-            <div className="relative z-10 w-full max-w-xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
-              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+            <div className="relative z-10 max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
                 <div>
                   <h2 className="text-lg font-black text-slate-950 dark:text-white">
                     {editingItem
@@ -574,43 +1178,60 @@ function Requirements() {
                   </h2>
 
                   <p className="mt-0.5 text-xs font-medium text-slate-500">
-                    {office.name} clearance
+                    {office?.name}{" "}
+                    clearance
                     configuration
                   </p>
                 </div>
 
                 <button
                   type="button"
-                  onClick={closeForm}
-                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700"
+                  disabled={saving}
+                  onClick={
+                    closeForm
+                  }
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-800 dark:hover:bg-slate-700"
                 >
                   <FaTimes />
                 </button>
               </div>
 
               <form
-                onSubmit={handleSubmit}
+                onSubmit={
+                  handleSubmit
+                }
                 className="space-y-5 p-5 sm:p-6"
               >
                 {/* TYPE */}
 
                 <div>
-                  <label className={labelClass}>
+                  <label
+                    className={
+                      labelClass
+                    }
+                  >
                     Item Type
                   </label>
 
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       type="button"
+                      disabled={
+                        saving
+                      }
                       onClick={() =>
                         setFormData(
-                          (current) => ({
+                          (
+                            current
+                          ) => ({
                             ...current,
-                            type: "Requirement",
+
+                            type:
+                              "Requirement",
                           })
                         )
                       }
-                      className={`rounded-2xl border p-4 text-left transition ${
+                      className={`rounded-2xl border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
                         formData.type ===
                         "Requirement"
                           ? "border-violet-500 bg-violet-50 ring-4 ring-violet-500/10 dark:bg-violet-500/10"
@@ -631,22 +1252,30 @@ function Requirements() {
                       </p>
 
                       <p className="mt-1 text-[11px] font-medium leading-4 text-slate-500">
-                        A check the staff can
-                        verify during review.
+                        A check the
+                        staff can verify
+                        during review.
                       </p>
                     </button>
 
                     <button
                       type="button"
+                      disabled={
+                        saving
+                      }
                       onClick={() =>
                         setFormData(
-                          (current) => ({
+                          (
+                            current
+                          ) => ({
                             ...current,
-                            type: "Question",
+
+                            type:
+                              "Question",
                           })
                         )
                       }
-                      className={`rounded-2xl border p-4 text-left transition ${
+                      className={`rounded-2xl border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60 ${
                         formData.type ===
                         "Question"
                           ? "border-blue-500 bg-blue-50 ring-4 ring-blue-500/10 dark:bg-blue-500/10"
@@ -667,8 +1296,11 @@ function Requirements() {
                       </p>
 
                       <p className="mt-1 text-[11px] font-medium leading-4 text-slate-500">
-                        A Yes/No question used
-                        during clearance review.
+                        A Yes/No
+                        question used
+                        during
+                        clearance
+                        review.
                       </p>
                     </button>
                   </div>
@@ -677,7 +1309,11 @@ function Requirements() {
                 {/* TITLE */}
 
                 <div>
-                  <label className={labelClass}>
+                  <label
+                    className={
+                      labelClass
+                    }
+                  >
                     {formData.type ===
                     "Question"
                       ? "Question"
@@ -687,23 +1323,37 @@ function Requirements() {
                   <input
                     type="text"
                     name="title"
-                    value={formData.title}
-                    onChange={handleChange}
+                    value={
+                      formData.title
+                    }
+                    disabled={
+                      saving
+                    }
+                    onChange={
+                      handleChange
+                    }
                     placeholder={
                       formData.type ===
                       "Question"
                         ? "Example: Does the student have an unresolved obligation?"
-                        : "Example: Present School ID"
+                        : "Example: No outstanding borrowed books"
                     }
-                    className={inputClass}
+                    className={
+                      inputClass
+                    }
                   />
                 </div>
 
                 {/* DESCRIPTION */}
 
                 <div>
-                  <label className={labelClass}>
-                    Description / Instructions
+                  <label
+                    className={
+                      labelClass
+                    }
+                  >
+                    Description /
+                    Instructions
                   </label>
 
                   <textarea
@@ -711,39 +1361,101 @@ function Requirements() {
                     value={
                       formData.description
                     }
-                    onChange={handleChange}
+                    disabled={
+                      saving
+                    }
+                    onChange={
+                      handleChange
+                    }
                     rows="4"
                     placeholder="Add a short explanation for the reviewing staff..."
                     className={`${inputClass} resize-none`}
                   />
                 </div>
 
-                {/* STATUS */}
+                {/* REQUIRED */}
 
-                <label className="flex cursor-pointer items-center justify-between gap-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
+                <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
                   <div>
                     <p className="text-sm font-black text-slate-900 dark:text-white">
-                      Active Item
+                      Required Item
                     </p>
 
-                    <p className="mt-1 text-xs font-medium text-slate-500">
-                      Active items appear in the
-                      office review checklist.
+                    <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
+                      Required items
+                      must be completed
+                      before the
+                      student can be
+                      approved by this
+                      office.
                     </p>
                   </div>
 
                   <button
                     type="button"
+                    disabled={
+                      saving
+                    }
                     onClick={() =>
                       setFormData(
-                        (current) => ({
+                        (
+                          current
+                        ) => ({
                           ...current,
+
+                          required:
+                            !current.required,
+                        })
+                      )
+                    }
+                    className={`shrink-0 text-3xl transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                      formData.required
+                        ? "text-blue-500"
+                        : "text-slate-300 dark:text-slate-600"
+                    }`}
+                  >
+                    {formData.required ? (
+                      <FaToggleOn />
+                    ) : (
+                      <FaToggleOff />
+                    )}
+                  </button>
+                </div>
+
+                {/* ACTIVE */}
+
+                <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
+                  <div>
+                    <p className="text-sm font-black text-slate-900 dark:text-white">
+                      Active Item
+                    </p>
+
+                    <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
+                      Active items
+                      appear in the
+                      office review
+                      checklist.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={
+                      saving
+                    }
+                    onClick={() =>
+                      setFormData(
+                        (
+                          current
+                        ) => ({
+                          ...current,
+
                           active:
                             !current.active,
                         })
                       )
                     }
-                    className={`text-3xl transition ${
+                    className={`shrink-0 text-3xl transition disabled:cursor-not-allowed disabled:opacity-60 ${
                       formData.active
                         ? "text-emerald-500"
                         : "text-slate-300 dark:text-slate-600"
@@ -755,28 +1467,42 @@ function Requirements() {
                       <FaToggleOff />
                     )}
                   </button>
-                </label>
+                </div>
 
                 {/* BUTTONS */}
 
                 <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-5 dark:border-slate-800 sm:flex-row sm:justify-end">
                   <button
                     type="button"
-                    onClick={closeForm}
-                    className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    disabled={
+                      saving
+                    }
+                    onClick={
+                      closeForm
+                    }
+                    className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                   >
                     Cancel
                   </button>
 
                   <button
                     type="submit"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
+                    disabled={
+                      saving
+                    }
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <FaCheck />
+                    {saving ? (
+                      <FaSpinner className="animate-spin" />
+                    ) : (
+                      <FaCheck />
+                    )}
 
-                    {editingItem
-                      ? "Save Changes"
-                      : "Add Item"}
+                    {saving
+                      ? "Saving..."
+                      : editingItem
+                        ? "Save Changes"
+                        : "Add Item"}
                   </button>
                 </div>
               </form>
@@ -784,17 +1510,19 @@ function Requirements() {
           </div>
         )}
 
-        {/* ===================================================
-            DELETE CONFIRMATION
-        =================================================== */}
+        {/* DELETE CONFIRMATION */}
 
         {deleteItem && (
           <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
             <button
               type="button"
               aria-label="Close delete confirmation"
+              disabled={saving}
               onClick={() =>
-                setDeleteItem(null)
+                !saving &&
+                setDeleteItem(
+                  null
+                )
               }
               className="absolute inset-0"
             />
@@ -809,29 +1537,65 @@ function Requirements() {
               </h2>
 
               <p className="mt-2 text-sm font-medium leading-6 text-slate-500 dark:text-slate-400">
-                "{deleteItem.title}" will be
-                removed from the office
+                "
+                {
+                  deleteItem.title
+                }
+                " will be removed
+                from the{" "}
+                {office?.name}{" "}
+                clearance
                 configuration.
               </p>
+
+              <div className="mt-4 rounded-2xl bg-red-50 p-3 dark:bg-red-500/5">
+                <p className="text-xs font-medium leading-5 text-red-700 dark:text-red-300">
+                  Delete should only
+                  be used when this
+                  item is no longer
+                  needed. If you only
+                  want to hide it
+                  from current
+                  reviews, use
+                  Disable instead.
+                </p>
+              </div>
 
               <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <button
                   type="button"
-                  onClick={() =>
-                    setDeleteItem(null)
+                  disabled={
+                    saving
                   }
-                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  onClick={() =>
+                    setDeleteItem(
+                      null
+                    )
+                  }
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="button"
-                  onClick={confirmDelete}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-red-700"
+                  disabled={
+                    saving
+                  }
+                  onClick={
+                    confirmDelete
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <FaTrash />
-                  Delete
+                  {saving ? (
+                    <FaSpinner className="animate-spin" />
+                  ) : (
+                    <FaTrash />
+                  )}
+
+                  {saving
+                    ? "Deleting..."
+                    : "Delete"}
                 </button>
               </div>
             </div>
@@ -842,19 +1606,23 @@ function Requirements() {
   );
 }
 
-// ===========================================================
-// STYLES
-// ===========================================================
+/*
+=========================================================
+STYLES
+=========================================================
+*/
 
 const inputClass =
-  "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-950 dark:text-white";
+  "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white";
 
 const labelClass =
   "mb-2 block text-xs font-black uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400";
 
-// ===========================================================
-// COMPONENTS
-// ===========================================================
+/*
+=========================================================
+STAT CARD
+=========================================================
+*/
 
 function StatCard({
   label,

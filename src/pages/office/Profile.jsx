@@ -1,182 +1,544 @@
-import { useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
+
 import {
   FaBuilding,
-  FaCamera,
   FaCheckCircle,
   FaEnvelope,
+  FaExclamationTriangle,
   FaIdBadge,
   FaInfoCircle,
   FaLock,
   FaSave,
   FaShieldAlt,
+  FaSpinner,
   FaUser,
   FaUserTie,
 } from "react-icons/fa";
 
 import OfficeStaffLayout from "../../layouts/OfficeStaffLayout";
 
+import { supabase } from "../../services/supabase";
+
+import {
+  getOfficeStaffContext,
+} from "../../services/officeStaffService";
+
 function Profile() {
-  // =========================================================
-  // MOCK PROFILE
-  // Later:
-  // auth user -> public.users -> approver_assignments -> offices
-  // =========================================================
+  const [loading, setLoading] =
+    useState(true);
 
-  const [profile, setProfile] = useState({
-    fullName: "Office Staff",
-    employeeId: "LIB-001",
-    email: "library.staff@example.com",
-    role: "Office Staff",
-    office: "Library",
-    officeCode: "LIB",
-    accountStatus: "Active",
-  });
+  const [error, setError] =
+    useState("");
 
-  const [originalProfile, setOriginalProfile] =
-    useState(profile);
+  const [success, setSuccess] =
+    useState("");
 
-  const [saving, setSaving] = useState(false);
+  const [context, setContext] =
+    useState(null);
 
-  const [passwordForm, setPasswordForm] =
+  const [profile, setProfile] =
     useState({
-      currentPassword: "",
-      newPassword: "",
-      confirmPassword: "",
+      id: "",
+      authId: "",
+      fullName: "",
+      employeeId: "",
+      email: "",
+      role: "Office Staff",
+      office: "",
+      officeCode: "",
+      accountStatus: "",
+      approverType: "",
     });
 
-  const [changingPassword, setChangingPassword] =
+  const [
+    originalProfile,
+    setOriginalProfile,
+  ] = useState(null);
+
+  const [saving, setSaving] =
     useState(false);
 
-  // =========================================================
-  // PROFILE
-  // =========================================================
+  const [
+    passwordForm,
+    setPasswordForm,
+  ] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
 
-  const handleProfileChange = (event) => {
-    const { name, value } = event.target;
+  const [
+    changingPassword,
+    setChangingPassword,
+  ] = useState(false);
 
-    setProfile((current) => ({
-      ...current,
-      [name]: value,
-    }));
-  };
+  const loadProfile =
+    async () => {
+      try {
+        setLoading(true);
+        setError("");
+        setSuccess("");
+
+        const contextData =
+          await getOfficeStaffContext();
+
+        const user =
+          contextData?.profile;
+
+        const office =
+          contextData?.office ||
+          contextData?.offices?.[0];
+
+        if (!user?.id) {
+          throw new Error(
+            "Office Staff profile not found."
+          );
+        }
+
+        if (!office?.id) {
+          throw new Error(
+            "No active office assignment was found for this account."
+          );
+        }
+
+        const mapped =
+          mapProfile(
+            user,
+            office
+          );
+
+        setContext(
+          contextData
+        );
+
+        setProfile(
+          mapped
+        );
+
+        setOriginalProfile(
+          mapped
+        );
+      } catch (err) {
+        console.error(
+          "Failed to load Office Staff profile:",
+          err
+        );
+
+        setError(
+          err?.message ||
+            "Unable to load your profile."
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+  useEffect(() => {
+    loadProfile();
+  }, []);
+
+  const handleProfileChange =
+    (event) => {
+      const {
+        name,
+        value,
+      } = event.target;
+
+      setSuccess("");
+
+      setProfile(
+        (current) => ({
+          ...current,
+          [name]: value,
+        })
+      );
+    };
 
   const hasProfileChanges =
-    profile.fullName !==
-      originalProfile.fullName ||
-    profile.email !== originalProfile.email;
+    originalProfile
+      ? profile.fullName.trim() !==
+          originalProfile.fullName.trim() ||
+        profile.email.trim() !==
+          originalProfile.email.trim()
+      : false;
 
-  const saveProfile = async (event) => {
-    event.preventDefault();
+  const saveProfile =
+    async (event) => {
+      event.preventDefault();
 
-    if (!profile.fullName.trim()) {
-      window.alert(
-        "Please enter your full name."
+      const fullName =
+        profile.fullName.trim();
+
+      const email =
+        profile.email
+          .trim()
+          .toLowerCase();
+
+      if (!fullName) {
+        setError(
+          "Please enter your full name."
+        );
+        return;
+      }
+
+      if (!email) {
+        setError(
+          "Please enter your email address."
+        );
+        return;
+      }
+
+      try {
+        setSaving(true);
+        setError("");
+        setSuccess("");
+
+        const {
+          data: authData,
+          error: authError,
+        } =
+          await supabase.auth.getUser();
+
+        if (authError) {
+          throw authError;
+        }
+
+        const authUser =
+          authData?.user;
+
+        if (!authUser?.id) {
+          throw new Error(
+            "Your authenticated session could not be verified."
+          );
+        }
+
+        const {
+          data:
+            updatedProfile,
+          error:
+            profileError,
+        } = await supabase
+          .from("users")
+          .update({
+            full_name:
+              fullName,
+            email,
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq(
+            "id",
+            profile.id
+          )
+          .eq(
+            "auth_id",
+            authUser.id
+          )
+          .select(`
+            id,
+            auth_id,
+            full_name,
+            employee_id,
+            email,
+            role,
+            status,
+            approver_type
+          `)
+          .single();
+
+        if (profileError) {
+          throw profileError;
+        }
+
+        /*
+         * Keep Supabase Auth email synchronized with public.users.
+         * Depending on the project's Supabase Auth configuration,
+         * changing the email may require confirmation before the
+         * Auth email itself changes.
+         */
+        if (
+          email !==
+          String(
+            authUser.email ||
+              ""
+          ).toLowerCase()
+        ) {
+          const {
+            error:
+              authUpdateError,
+          } =
+            await supabase.auth.updateUser({
+              email,
+            });
+
+          if (
+            authUpdateError
+          ) {
+            /*
+             * The public.users update already succeeded.
+             * Restore it so the two account records do not silently
+             * drift apart when Auth rejects the email change.
+             */
+            const {
+              error:
+                rollbackError,
+            } = await supabase
+              .from("users")
+              .update({
+                full_name:
+                  originalProfile.fullName,
+                email:
+                  originalProfile.email,
+                updated_at:
+                  new Date().toISOString(),
+              })
+              .eq(
+                "id",
+                profile.id
+              )
+              .eq(
+                "auth_id",
+                authUser.id
+              );
+
+            if (
+              rollbackError
+            ) {
+              console.error(
+                "Profile rollback failed:",
+                rollbackError
+              );
+            }
+
+            throw authUpdateError;
+          }
+        }
+
+        const office =
+          context?.office ||
+          context?.offices?.[0];
+
+        const mapped =
+          mapProfile(
+            updatedProfile,
+            office
+          );
+
+        setProfile(
+          mapped
+        );
+
+        setOriginalProfile(
+          mapped
+        );
+
+        setSuccess(
+          email !==
+            String(
+              authUser.email ||
+                ""
+            ).toLowerCase()
+            ? "Profile saved. If email confirmation is enabled, confirm the new email address before using it to sign in."
+            : "Profile changes saved successfully."
+        );
+      } catch (err) {
+        console.error(
+          "Failed to save Office Staff profile:",
+          err
+        );
+
+        setError(
+          err?.message ||
+            "Unable to save your profile."
+        );
+      } finally {
+        setSaving(false);
+      }
+    };
+
+  const handlePasswordChange =
+    (event) => {
+      const {
+        name,
+        value,
+      } = event.target;
+
+      setSuccess("");
+
+      setPasswordForm(
+        (current) => ({
+          ...current,
+          [name]: value,
+        })
       );
-      return;
-    }
+    };
 
-    if (!profile.email.trim()) {
-      window.alert(
-        "Please enter your email address."
-      );
-      return;
-    }
+  const updatePassword =
+    async (event) => {
+      event.preventDefault();
 
-    setSaving(true);
+      if (
+        !passwordForm.currentPassword ||
+        !passwordForm.newPassword ||
+        !passwordForm.confirmPassword
+      ) {
+        setError(
+          "Please complete all password fields."
+        );
+        return;
+      }
 
-    try {
-      // Frontend prototype only.
-      // Later: update public.users through Supabase.
+      if (
+        passwordForm.newPassword.length <
+        8
+      ) {
+        setError(
+          "New password must contain at least 8 characters."
+        );
+        return;
+      }
 
-      await new Promise((resolve) =>
-        setTimeout(resolve, 500)
-      );
+      if (
+        passwordForm.newPassword !==
+        passwordForm.confirmPassword
+      ) {
+        setError(
+          "New password and confirmation do not match."
+        );
+        return;
+      }
 
-      setOriginalProfile(profile);
+      if (
+        passwordForm.currentPassword ===
+        passwordForm.newPassword
+      ) {
+        setError(
+          "Your new password must be different from your current password."
+        );
+        return;
+      }
 
-      window.alert(
-        "Profile changes saved for the UI prototype."
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
+      try {
+        setChangingPassword(
+          true
+        );
+        setError("");
+        setSuccess("");
 
-  // =========================================================
-  // PASSWORD
-  // =========================================================
+        const {
+          data: authData,
+          error: authError,
+        } =
+          await supabase.auth.getUser();
 
-  const handlePasswordChange = (event) => {
-    const { name, value } = event.target;
+        if (authError) {
+          throw authError;
+        }
 
-    setPasswordForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
-  };
+        const authUser =
+          authData?.user;
 
-  const updatePassword = async (event) => {
-    event.preventDefault();
+        if (
+          !authUser?.id ||
+          !authUser?.email
+        ) {
+          throw new Error(
+            "Your authenticated account could not be verified."
+          );
+        }
 
-    if (
-      !passwordForm.currentPassword ||
-      !passwordForm.newPassword ||
-      !passwordForm.confirmPassword
-    ) {
-      window.alert(
-        "Please complete all password fields."
-      );
-      return;
-    }
+        /*
+         * Verify the current password without replacing the active
+         * browser session. A temporary Supabase client is not needed:
+         * signInWithPassword refreshes the same authenticated user,
+         * then updateUser changes only that verified account.
+         */
+        const {
+          error:
+            verificationError,
+        } =
+          await supabase.auth.signInWithPassword({
+            email:
+              authUser.email,
+            password:
+              passwordForm.currentPassword,
+          });
 
-    if (
-      passwordForm.newPassword.length < 8
-    ) {
-      window.alert(
-        "New password must contain at least 8 characters."
-      );
-      return;
-    }
+        if (
+          verificationError
+        ) {
+          throw new Error(
+            "Current password is incorrect."
+          );
+        }
 
-    if (
-      passwordForm.newPassword !==
-      passwordForm.confirmPassword
-    ) {
-      window.alert(
-        "New password and confirmation do not match."
-      );
-      return;
-    }
+        const {
+          error:
+            passwordError,
+        } =
+          await supabase.auth.updateUser({
+            password:
+              passwordForm.newPassword,
+          });
 
-    setChangingPassword(true);
+        if (
+          passwordError
+        ) {
+          throw passwordError;
+        }
 
-    try {
-      // Frontend prototype only.
-      // Later: Supabase Auth password update.
+        setPasswordForm({
+          currentPassword: "",
+          newPassword: "",
+          confirmPassword: "",
+        });
 
-      await new Promise((resolve) =>
-        setTimeout(resolve, 500)
-      );
+        setSuccess(
+          "Password updated successfully."
+        );
+      } catch (err) {
+        console.error(
+          "Failed to update password:",
+          err
+        );
 
-      setPasswordForm({
-        currentPassword: "",
-        newPassword: "",
-        confirmPassword: "",
-      });
+        setError(
+          err?.message ||
+            "Unable to update your password."
+        );
+      } finally {
+        setChangingPassword(
+          false
+        );
+      }
+    };
 
-      window.alert(
-        "Password update simulated successfully."
-      );
-    } finally {
-      setChangingPassword(false);
-    }
-  };
+  if (loading) {
+    return (
+      <OfficeStaffLayout>
+        <div className="mx-auto flex min-h-[65vh] w-full max-w-[1300px] items-center justify-center">
+          <div className="text-center">
+            <FaSpinner className="mx-auto animate-spin text-3xl text-blue-600 dark:text-blue-400" />
+
+            <p className="mt-4 text-sm font-black text-slate-800 dark:text-slate-200">
+              Loading Profile
+            </p>
+
+            <p className="mt-1 text-xs font-medium text-slate-500">
+              Retrieving your account and office assignment.
+            </p>
+          </div>
+        </div>
+      </OfficeStaffLayout>
+    );
+  }
 
   return (
     <OfficeStaffLayout>
       <div className="mx-auto w-full max-w-[1300px] space-y-6">
-        {/* HEADER */}
-
         <section>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-blue-700 dark:bg-blue-500/10 dark:text-blue-400">
@@ -193,33 +555,51 @@ function Profile() {
           </h1>
 
           <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-slate-500 dark:text-slate-400">
-            View your office assignment and
-            manage your personal account
-            information.
+            View your office assignment and manage your personal account information.
           </p>
         </section>
 
-        {/* PROFILE HERO */}
+        {error && (
+          <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+            <FaExclamationTriangle className="mt-0.5 shrink-0" />
+
+            <div>
+              <p className="text-sm font-black">
+                Account Error
+              </p>
+
+              <p className="mt-1 text-xs font-medium leading-5">
+                {error}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {success && (
+          <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+            <FaCheckCircle className="mt-0.5 shrink-0" />
+
+            <div>
+              <p className="text-sm font-black">
+                Success
+              </p>
+
+              <p className="mt-1 text-xs font-medium leading-5">
+                {success}
+              </p>
+            </div>
+          </div>
+        )}
 
         <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="relative overflow-hidden p-6 sm:p-7">
             <div className="absolute -right-16 -top-24 h-64 w-64 rounded-full bg-blue-100 blur-3xl dark:bg-blue-500/10" />
 
             <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center">
-              <div className="relative">
-                <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-slate-950 text-2xl font-black text-white shadow-xl dark:bg-blue-600">
-                  {getInitials(
-                    profile.fullName
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  title="Profile picture"
-                  className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-xl border-2 border-white bg-blue-600 text-xs text-white shadow-md transition hover:bg-blue-700 dark:border-slate-900"
-                >
-                  <FaCamera />
-                </button>
+              <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-slate-950 text-2xl font-black text-white shadow-xl dark:bg-blue-600">
+                {getInitials(
+                  profile.fullName
+                )}
               </div>
 
               <div className="min-w-0 flex-1">
@@ -228,15 +608,26 @@ function Profile() {
                     {profile.fullName}
                   </h2>
 
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wide ${
+                      String(
+                        profile.accountStatus
+                      ).toLowerCase() ===
+                      "active"
+                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+                        : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400"
+                    }`}
+                  >
                     <FaCheckCircle />
-                    {profile.accountStatus}
+                    {profile.accountStatus ||
+                      "Unknown"}
                   </span>
                 </div>
 
                 <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
-                  {profile.employeeId} •{" "}
-                  {profile.office}
+                  {profile.employeeId ||
+                    "No Employee ID"}{" "}
+                  • {profile.office}
                 </p>
 
                 <div className="mt-3 inline-flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
@@ -249,13 +640,11 @@ function Profile() {
         </section>
 
         <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
-          {/* LEFT */}
-
           <div className="space-y-6">
-            {/* PERSONAL INFORMATION */}
-
             <form
-              onSubmit={saveProfile}
+              onSubmit={
+                saveProfile
+              }
               className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900"
             >
               <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
@@ -268,8 +657,7 @@ function Profile() {
                 </div>
 
                 <p className="mt-1 text-xs font-medium text-slate-500">
-                  Update your basic account
-                  information.
+                  Update your basic account information.
                 </p>
               </div>
 
@@ -308,7 +696,9 @@ function Profile() {
                       <input
                         type="email"
                         name="email"
-                        value={profile.email}
+                        value={
+                          profile.email
+                        }
                         onChange={
                           handleProfileChange
                         }
@@ -323,14 +713,17 @@ function Profile() {
                     icon={FaIdBadge}
                     label="Employee ID"
                     value={
-                      profile.employeeId
+                      profile.employeeId ||
+                      "—"
                     }
                   />
 
                   <ReadOnlyField
                     icon={FaUserTie}
                     label="System Role"
-                    value={profile.role}
+                    value={
+                      profile.role
+                    }
                   />
                 </div>
 
@@ -343,7 +736,11 @@ function Profile() {
                     }
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-black text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <FaSave />
+                    {saving ? (
+                      <FaSpinner className="animate-spin" />
+                    ) : (
+                      <FaSave />
+                    )}
 
                     {saving
                       ? "Saving..."
@@ -353,10 +750,10 @@ function Profile() {
               </div>
             </form>
 
-            {/* PASSWORD */}
-
             <form
-              onSubmit={updatePassword}
+              onSubmit={
+                updatePassword
+              }
               className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900"
             >
               <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
@@ -369,8 +766,7 @@ function Profile() {
                 </div>
 
                 <p className="mt-1 text-xs font-medium text-slate-500">
-                  Update the password used to
-                  access your account.
+                  Update the password used to access your account.
                 </p>
               </div>
 
@@ -390,6 +786,7 @@ function Profile() {
                       handlePasswordChange
                     }
                     placeholder="Enter current password"
+                    autoComplete="current-password"
                     className={inputClass}
                   />
                 </div>
@@ -410,6 +807,7 @@ function Profile() {
                         handlePasswordChange
                       }
                       placeholder="Minimum 8 characters"
+                      autoComplete="new-password"
                       className={inputClass}
                     />
                   </div>
@@ -429,6 +827,7 @@ function Profile() {
                         handlePasswordChange
                       }
                       placeholder="Repeat new password"
+                      autoComplete="new-password"
                       className={inputClass}
                     />
                   </div>
@@ -437,10 +836,16 @@ function Profile() {
                 <div className="flex justify-end border-t border-slate-100 pt-5 dark:border-slate-800">
                   <button
                     type="submit"
-                    disabled={changingPassword}
+                    disabled={
+                      changingPassword
+                    }
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-black text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-800 dark:hover:bg-blue-600"
                   >
-                    <FaLock />
+                    {changingPassword ? (
+                      <FaSpinner className="animate-spin" />
+                    ) : (
+                      <FaLock />
+                    )}
 
                     {changingPassword
                       ? "Updating..."
@@ -451,11 +856,7 @@ function Profile() {
             </form>
           </div>
 
-          {/* RIGHT */}
-
           <aside className="space-y-6">
-            {/* OFFICE ASSIGNMENT */}
-
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-center gap-2">
                 <FaBuilding className="text-blue-600 dark:text-blue-400" />
@@ -484,15 +885,10 @@ function Profile() {
                 <FaInfoCircle className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
 
                 <p className="text-xs font-medium leading-5 text-blue-700 dark:text-blue-300">
-                  Office assignments are
-                  controlled by the Administrator
-                  and cannot be changed from this
-                  profile.
+                  Office assignments are controlled by the Administrator and cannot be changed from this profile.
                 </p>
               </div>
             </div>
-
-            {/* ACCESS */}
 
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-center gap-2">
@@ -507,9 +903,15 @@ function Profile() {
                 <AccessItem
                   label="Account Status"
                   value={
-                    profile.accountStatus
+                    profile.accountStatus ||
+                    "Unknown"
                   }
-                  active
+                  active={
+                    String(
+                      profile.accountStatus
+                    ).toLowerCase() ===
+                    "active"
+                  }
                 />
 
                 <AccessItem
@@ -519,12 +921,20 @@ function Profile() {
 
                 <AccessItem
                   label="Clearance Office"
-                  value={profile.office}
+                  value={
+                    profile.office
+                  }
+                />
+
+                <AccessItem
+                  label="Approver Type"
+                  value={
+                    profile.approverType ||
+                    "Office"
+                  }
                 />
               </div>
             </div>
-
-            {/* SECURITY NOTE */}
 
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-900/60">
               <div className="flex items-start gap-3">
@@ -536,10 +946,7 @@ function Profile() {
                   </p>
 
                   <p className="mt-1 text-xs font-medium leading-5 text-slate-500 dark:text-slate-400">
-                    Clearance actions will be
-                    associated with the authenticated
-                    staff account and its active
-                    office assignment.
+                    Clearance actions are associated with your authenticated staff account and its active office assignment.
                   </p>
                 </div>
               </div>
@@ -551,19 +958,11 @@ function Profile() {
   );
 }
 
-// ===========================================================
-// STYLES
-// ===========================================================
-
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-950 dark:text-white";
 
 const labelClass =
   "mb-2 block text-xs font-black uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400";
-
-// ===========================================================
-// COMPONENTS
-// ===========================================================
 
 function ReadOnlyField({
   icon: Icon,
@@ -615,11 +1014,49 @@ function AccessItem({
   );
 }
 
+function mapProfile(
+  user,
+  office
+) {
+  return {
+    id: user?.id || "",
+    authId:
+      user?.auth_id || "",
+    fullName:
+      user?.full_name ||
+      "Office Staff",
+    employeeId:
+      user?.employee_id ||
+      "",
+    email:
+      user?.email || "",
+    role: "Office Staff",
+    office:
+      office?.office_name ||
+      office?.name ||
+      "Office",
+    officeCode:
+      office?.office_code ||
+      office?.code ||
+      "OFFICE",
+    accountStatus:
+      user?.status ||
+      "Unknown",
+    approverType:
+      user?.approver_type ||
+      "Office",
+  };
+}
+
 function getInitials(name) {
-  return name
+  return String(
+    name || "Office Staff"
+  )
     .split(" ")
     .filter(Boolean)
-    .map((part) => part[0])
+    .map(
+      (part) => part[0]
+    )
     .join("")
     .slice(0, 2)
     .toUpperCase();

@@ -1,4 +1,13 @@
-import { NavLink, useNavigate } from "react-router-dom";
+import {
+  useEffect,
+  useState,
+} from "react";
+
+import {
+  NavLink,
+  useNavigate,
+} from "react-router-dom";
+
 import {
   FaHome,
   FaCalendarAlt,
@@ -11,50 +20,172 @@ import {
   FaBuilding,
 } from "react-icons/fa";
 
-function Sidebar({ onNavigate }) {
-  const navigate = useNavigate();
+import { supabase } from "../../services/supabase";
 
-  const handleNavigate = () => {
-    if (onNavigate) {
-      onNavigate();
-    }
-  };
+import {
+  getOfficeStaffContext,
+} from "../../services/officeStaffService";
 
-  const handleLogout = async () => {
-    try {
-      // Temporary frontend-only logout navigation.
-      // Supabase logout integration will be connected
-      // when we wire the Office Staff backend/auth flow.
-      handleNavigate();
-      navigate("/login");
-    } catch (error) {
-      console.error("Office Staff logout error:", error);
-    }
-  };
+function Sidebar({
+  onNavigate,
+}) {
+  const navigate =
+    useNavigate();
+
+  const [
+    officeName,
+    setOfficeName,
+  ] = useState(
+    "Loading..."
+  );
+
+  const [
+    officeCode,
+    setOfficeCode,
+  ] = useState("");
+
+  const [
+    loadingOffice,
+    setLoadingOffice,
+  ] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadOffice =
+      async () => {
+        try {
+          setLoadingOffice(
+            true
+          );
+
+          const context =
+            await getOfficeStaffContext();
+
+          if (!mounted) {
+            return;
+          }
+
+          const office =
+            context?.office ||
+            context?.offices?.[0];
+
+          const resolvedName =
+            office?.office_name ||
+            office?.name ||
+            "Office";
+
+          const resolvedCode =
+            office?.office_code ||
+            office?.code ||
+            "";
+
+          setOfficeName(
+            resolvedName
+          );
+
+          setOfficeCode(
+            resolvedCode
+          );
+        } catch (error) {
+          console.error(
+            "Failed to load Office Staff sidebar context:",
+            error
+          );
+
+          if (mounted) {
+            setOfficeName(
+              "Office"
+            );
+
+            setOfficeCode(
+              ""
+            );
+          }
+        } finally {
+          if (mounted) {
+            setLoadingOffice(
+              false
+            );
+          }
+        }
+      };
+
+    loadOffice();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleNavigate =
+    () => {
+      if (onNavigate) {
+        onNavigate();
+      }
+    };
+
+  const handleLogout =
+    async () => {
+      try {
+        const {
+          error,
+        } =
+          await supabase.auth.signOut();
+
+        if (error) {
+          throw error;
+        }
+
+        handleNavigate();
+
+        navigate(
+          "/login",
+          {
+            replace: true,
+          }
+        );
+      } catch (error) {
+        console.error(
+          "Office Staff logout error:",
+          error
+        );
+      }
+    };
 
   const menuGroups = [
     {
       title: "Workspace",
       items: [
         {
-          label: "Overview",
-          path: "/office/dashboard",
+          label:
+            "Overview",
+          path:
+            "/office/dashboard",
           icon: FaHome,
         },
         {
-          label: "Schedule & Batches",
-          path: "/office/schedule",
-          icon: FaCalendarAlt,
+          label:
+            "Schedule & Batches",
+          path:
+            "/office/schedule",
+          icon:
+            FaCalendarAlt,
         },
         {
-          label: "Student Queue",
-          path: "/office/students",
+          label:
+            "Student Queue",
+          path:
+            "/office/students",
           icon: FaUsers,
         },
         {
-          label: "Requirements",
-          path: "/office/requirements",
-          icon: FaClipboardList,
+          label:
+            "Requirements",
+          path:
+            "/office/requirements",
+          icon:
+            FaClipboardList,
         },
       ],
     },
@@ -62,9 +193,12 @@ function Sidebar({ onNavigate }) {
       title: "Clearance",
       items: [
         {
-          label: "Reviewed Students",
-          path: "/office/reviewed",
-          icon: FaCheckCircle,
+          label:
+            "Reviewed Students",
+          path:
+            "/office/reviewed",
+          icon:
+            FaCheckCircle,
         },
       ],
     },
@@ -72,20 +206,27 @@ function Sidebar({ onNavigate }) {
       title: "Account",
       items: [
         {
-          label: "Notifications",
-          path: "/office/notifications",
+          label:
+            "Notifications",
+          path:
+            "/office/notifications",
           icon: FaBell,
         },
         {
-          label: "Profile",
-          path: "/office/profile",
-          icon: FaUserCircle,
+          label:
+            "Profile",
+          path:
+            "/office/profile",
+          icon:
+            FaUserCircle,
         },
       ],
     },
   ];
 
-  const getNavClass = ({ isActive }) =>
+  const getNavClass = ({
+    isActive,
+  }) =>
     [
       "group flex items-center gap-3 rounded-xl px-3 py-2.5",
       "text-sm font-semibold transition-all duration-200",
@@ -112,15 +253,15 @@ function Sidebar({ onNavigate }) {
             </h1>
 
             <p className="truncate text-xs font-semibold text-slate-400">
-              Office Staff Portal
+              Office Staff
+              Portal
             </p>
           </div>
         </div>
       </div>
 
       {/* =====================================================
-          OFFICE INFORMATION
-          Temporary UI data until backend integration.
+          CURRENT OFFICE
       ===================================================== */}
 
       <div className="px-4 pt-4">
@@ -132,12 +273,26 @@ function Sidebar({ onNavigate }) {
 
             <div className="min-w-0">
               <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                Current Office
+                Current
+                Office
               </p>
 
-              <p className="truncate text-sm font-bold text-white">
-                Library
-              </p>
+              <div className="flex min-w-0 items-center gap-2">
+                <p className="truncate text-sm font-bold text-white">
+                  {loadingOffice
+                    ? "Loading..."
+                    : officeName}
+                </p>
+
+                {!loadingOffice &&
+                  officeCode && (
+                    <span className="shrink-0 rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-blue-300">
+                      {
+                        officeCode
+                      }
+                    </span>
+                  )}
+              </div>
             </div>
           </div>
         </div>
@@ -149,36 +304,57 @@ function Sidebar({ onNavigate }) {
 
       <nav className="flex-1 overflow-y-auto px-4 py-5">
         <div className="space-y-6">
-          {menuGroups.map((group) => (
-            <div key={group.title}>
-              <p className="mb-2 px-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
-                {group.title}
-              </p>
+          {menuGroups.map(
+            (group) => (
+              <div
+                key={
+                  group.title
+                }
+              >
+                <p className="mb-2 px-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+                  {
+                    group.title
+                  }
+                </p>
 
-              <div className="space-y-1">
-                {group.items.map((item) => {
-                  const Icon = item.icon;
+                <div className="space-y-1">
+                  {group.items.map(
+                    (item) => {
+                      const Icon =
+                        item.icon;
 
-                  return (
-                    <NavLink
-                      key={item.path}
-                      to={item.path}
-                      onClick={handleNavigate}
-                      className={getNavClass}
-                    >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/5 transition group-hover:bg-white/10">
-                        <Icon className="text-sm" />
-                      </span>
+                      return (
+                        <NavLink
+                          key={
+                            item.path
+                          }
+                          to={
+                            item.path
+                          }
+                          onClick={
+                            handleNavigate
+                          }
+                          className={
+                            getNavClass
+                          }
+                        >
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/5 transition group-hover:bg-white/10">
+                            <Icon className="text-sm" />
+                          </span>
 
-                      <span className="truncate">
-                        {item.label}
-                      </span>
-                    </NavLink>
-                  );
-                })}
+                          <span className="truncate">
+                            {
+                              item.label
+                            }
+                          </span>
+                        </NavLink>
+                      );
+                    }
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          )}
         </div>
       </nav>
 
@@ -189,14 +365,18 @@ function Sidebar({ onNavigate }) {
       <div className="border-t border-white/10 p-4">
         <button
           type="button"
-          onClick={handleLogout}
+          onClick={
+            handleLogout
+          }
           className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-300 transition-all duration-200 hover:bg-red-500/10 hover:text-red-300"
         >
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/5">
             <FaSignOutAlt className="text-sm" />
           </span>
 
-          <span>Sign Out</span>
+          <span>
+            Sign Out
+          </span>
         </button>
 
         <p className="mt-4 text-center text-[10px] font-medium text-slate-600">

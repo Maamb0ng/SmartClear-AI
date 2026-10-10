@@ -118,13 +118,17 @@ async function getAuthenticatedOfficeStaff() {
     );
   }
 
+  const approverType = clean(
+    profile.approver_type
+  ).toLowerCase();
+
   if (
-    clean(
-      profile.approver_type
-    ).toLowerCase() !== "office"
+    !["office", "faculty"].includes(
+      approverType
+    )
   ) {
     throw new Error(
-      "This account is not classified as Office Staff."
+      "This account is not authorized for office clearance responsibilities."
     );
   }
 

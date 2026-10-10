@@ -45,6 +45,7 @@ import {
   rejectUser,
   deleteUser,
   updateUser,
+  updateUserAccount,
 } from "../../services/userService";
 
 import { supabase } from "../../services/supabase";
@@ -339,6 +340,8 @@ function UserManagement() {
     setEditData,
   ] = useState({
     full_name: "",
+    email: "",
+    employee_id: "",
     role: "",
     department: "",
     course: "",
@@ -1425,6 +1428,12 @@ function UserManagement() {
       full_name:
         user.full_name ||
         "",
+      email:
+        user.email ||
+        "",
+      employee_id:
+        user.employee_id ||
+        "",
       role:
         user.role ||
         "",
@@ -1489,9 +1498,18 @@ function UserManagement() {
       return;
     }
 
-    if (
-      !editData.full_name.trim()
-    ) {
+    const normalizedFullName =
+      editData.full_name.trim();
+
+    const normalizedEmail =
+      editData.email
+        .trim()
+        .toLowerCase();
+
+    const normalizedEmployeeId =
+      editData.employee_id.trim();
+
+    if (!normalizedFullName) {
       await Swal.fire({
         icon:
           "warning",
@@ -1499,6 +1517,43 @@ function UserManagement() {
           "Full Name Required",
         text:
           "Enter the user's full name before saving.",
+        confirmButtonColor:
+          "#2563eb",
+      });
+
+      return;
+    }
+
+    if (!normalizedEmail) {
+      await Swal.fire({
+        icon:
+          "warning",
+        title:
+          "Email Required",
+        text:
+          "Enter the user's email address before saving.",
+        confirmButtonColor:
+          "#2563eb",
+      });
+
+      return;
+    }
+
+    const emailPattern =
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (
+      !emailPattern.test(
+        normalizedEmail
+      )
+    ) {
+      await Swal.fire({
+        icon:
+          "warning",
+        title:
+          "Invalid Email",
+        text:
+          "Enter a valid email address before saving.",
         confirmButtonColor:
           "#2563eb",
       });
@@ -1535,10 +1590,34 @@ function UserManagement() {
         true
       );
 
+      await updateUserAccount({
+        userId:
+          editingUser.id,
+        fullName:
+          normalizedFullName,
+        email:
+          normalizedEmail,
+        employeeId:
+          normalizedEmployeeId,
+      });
+
       const updates = {
-        ...editData,
-        full_name:
-          editData.full_name.trim(),
+        role:
+          editData.role,
+        department:
+          editData.department,
+        course:
+          editData.course,
+        year_level:
+          editData.year_level,
+        block:
+          editData.block,
+        student_type:
+          editData.student_type,
+        approver_type:
+          editData.approver_type,
+        office:
+          editData.office,
       };
 
       if (
@@ -1563,7 +1642,9 @@ function UserManagement() {
           "success",
         title:
           "User Updated",
-        timer: 1400,
+        text:
+          "The account information was updated successfully.",
+        timer: 1600,
         showConfirmButton:
           false,
       });
@@ -3037,7 +3118,7 @@ function UserManagement() {
                         </h2>
 
                         <p className="mt-1 text-xs text-blue-100/60">
-                          Update role-specific account information.
+                          Update account identity, login email, and role-specific information.
                         </p>
                       </div>
                     </div>
@@ -3081,6 +3162,59 @@ function UserManagement() {
                         className="h-12 w-full rounded-xl border border-slate-300 px-4 text-sm outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
                         required
                       />
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-bold text-slate-700">
+                        Email Address
+                      </span>
+
+                      <div className="relative">
+                        <FaEnvelope className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+
+                        <input
+                          type="email"
+                          name="email"
+                          value={
+                            editData.email
+                          }
+                          onChange={
+                            handleEditChange
+                          }
+                          placeholder="user@example.com"
+                          autoComplete="off"
+                          className="h-12 w-full rounded-xl border border-slate-300 pl-11 pr-4 text-sm outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+                          required
+                        />
+                      </div>
+
+                      <p className="mt-2 text-xs leading-5 text-slate-500">
+                        Changing this also updates the user's Supabase authentication email.
+                      </p>
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-bold text-slate-700">
+                        Employee ID
+                      </span>
+
+                      <div className="relative">
+                        <FaIdBadge className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+
+                        <input
+                          type="text"
+                          name="employee_id"
+                          value={
+                            editData.employee_id
+                          }
+                          onChange={
+                            handleEditChange
+                          }
+                          placeholder="e.g. 2026-0002"
+                          autoComplete="off"
+                          className="h-12 w-full rounded-xl border border-slate-300 pl-11 pr-4 text-sm outline-none transition focus:border-blue-600 focus:ring-4 focus:ring-blue-100"
+                        />
+                      </div>
                     </label>
 
                     <label className="block md:col-span-2">
@@ -3300,7 +3434,7 @@ function UserManagement() {
                   </div>
 
                   <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-xs leading-5 text-blue-700">
-                    Approver Type controls portal classification only. Office and class assignments remain managed through their existing assignment workflows.
+                    Full Name, Email, and Employee ID are account-level information. Email changes are synchronized with the user's authentication account. Approver Type controls portal classification only; office and class assignments remain managed through their existing assignment workflows.
                   </div>
 
                   <div className="flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">

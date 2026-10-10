@@ -22,23 +22,36 @@ function normalizeYearLevel(value) {
     return directNumber;
   }
 
-  if (normalized.includes("1st") || normalized.includes("first")) {
+  if (
+    normalized.includes("1st") ||
+    normalized.includes("first")
+  ) {
     return 1;
   }
 
-  if (normalized.includes("2nd") || normalized.includes("second")) {
+  if (
+    normalized.includes("2nd") ||
+    normalized.includes("second")
+  ) {
     return 2;
   }
 
-  if (normalized.includes("3rd") || normalized.includes("third")) {
+  if (
+    normalized.includes("3rd") ||
+    normalized.includes("third")
+  ) {
     return 3;
   }
 
-  if (normalized.includes("4th") || normalized.includes("fourth")) {
+  if (
+    normalized.includes("4th") ||
+    normalized.includes("fourth")
+  ) {
     return 4;
   }
 
-  const extractedNumber = normalized.match(/[1-4]/);
+  const extractedNumber =
+    normalized.match(/[1-4]/);
 
   return extractedNumber
     ? Number(extractedNumber[0])
@@ -46,7 +59,12 @@ function normalizeYearLevel(value) {
 }
 
 function normalizeBlock(value) {
-  if (value === null || value === undefined) return "";
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return "";
+  }
 
   return String(value)
     .trim()
@@ -97,12 +115,13 @@ function getSectionBlock(section) {
 }
 
 export async function getUsers() {
-  const { data, error } = await supabase
-    .from("users")
-    .select("*")
-    .order("created_at", {
-      ascending: false,
-    });
+  const { data, error } =
+    await supabase
+      .from("users")
+      .select("*")
+      .order("created_at", {
+        ascending: false,
+      });
 
   if (error) throw error;
 
@@ -111,31 +130,40 @@ export async function getUsers() {
 
 export async function getUser(id) {
   if (!id) {
-    throw new Error("User ID is required.");
+    throw new Error(
+      "User ID is required."
+    );
   }
 
-  const { data, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", id)
-    .single();
+  const { data, error } =
+    await supabase
+      .from("users")
+      .select("*")
+      .eq("id", id)
+      .single();
 
   if (error) throw error;
 
   return data;
 }
 
-export async function updateUser(id, updates) {
+export async function updateUser(
+  id,
+  updates
+) {
   if (!id) {
-    throw new Error("User ID is required.");
+    throw new Error(
+      "User ID is required."
+    );
   }
 
-  const { data, error } = await supabase
-    .from("users")
-    .update(updates)
-    .eq("id", id)
-    .select()
-    .single();
+  const { data, error } =
+    await supabase
+      .from("users")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
 
   if (error) throw error;
 
@@ -144,11 +172,16 @@ export async function updateUser(id, updates) {
 
 export async function approveUser(user) {
   if (!user?.id) {
-    throw new Error("Invalid user record.");
+    throw new Error(
+      "Invalid user record."
+    );
   }
 
-  const role = normalizeText(user.role);
-  const isStudent = role.includes("student");
+  const role =
+    normalizeText(user.role);
+
+  const isStudent =
+    role.includes("student");
 
   /*
    * ============================================================
@@ -157,15 +190,16 @@ export async function approveUser(user) {
    */
 
   if (!isStudent) {
-    const { data, error } = await supabase
-      .from("users")
-      .update({
-        status: "Active",
-        email_verified: true,
-      })
-      .eq("id", user.id)
-      .select()
-      .single();
+    const { data, error } =
+      await supabase
+        .from("users")
+        .update({
+          status: "Active",
+          email_verified: true,
+        })
+        .eq("id", user.id)
+        .select()
+        .single();
 
     if (error) throw error;
 
@@ -178,11 +212,12 @@ export async function approveUser(user) {
    * ============================================================
    */
 
-  const studentType = normalizeText(
-    user.student_type ||
-      user.student_classification ||
-      "Regular"
-  );
+  const studentType =
+    normalizeText(
+      user.student_type ||
+        user.student_classification ||
+        "Regular"
+    );
 
   /*
    * ============================================================
@@ -218,7 +253,9 @@ export async function approveUser(user) {
       data: irregularAssignments,
       error: irregularAssignmentsError,
     } = await supabase
-      .from("student_irregular_subjects")
+      .from(
+        "student_irregular_subjects"
+      )
       .select(`
         id,
         student_id,
@@ -256,6 +293,7 @@ export async function approveUser(user) {
      * Student selected Irregular during registration,
      * but there are no saved subjects.
      */
+
     if (assignments.length === 0) {
       throw new Error(
         "This irregular student has no saved subject selections. Open Selected Subjects in User Management and verify the registration data first."
@@ -279,6 +317,7 @@ export async function approveUser(user) {
      * Semester
      * School Year
      */
+
     const unapprovedAssignments =
       assignments.filter(
         (assignment) => {
@@ -294,30 +333,34 @@ export async function approveUser(user) {
         }
       );
 
-    if (unapprovedAssignments.length > 0) {
+    if (
+      unapprovedAssignments.length > 0
+    ) {
       throw new Error(
         `${unapprovedAssignments.length} irregular subject selection(s) still require Administrator verification and an official class offering before this account can be activated.`
       );
     }
   }
-
-  /*
+    /*
    * ============================================================
    * OFFICIAL STUDENT SECTION VALIDATION
    * ============================================================
    */
 
-  const course = normalizeCourse(
-    user.course
-  );
+  const course =
+    normalizeCourse(
+      user.course
+    );
 
-  const yearLevel = normalizeYearLevel(
-    user.year_level
-  );
+  const yearLevel =
+    normalizeYearLevel(
+      user.year_level
+    );
 
-  const block = normalizeBlock(
-    getUserBlock(user)
-  );
+  const block =
+    normalizeBlock(
+      getUserBlock(user)
+    );
 
   if (!course) {
     throw new Error(
@@ -428,17 +471,20 @@ export async function approveUser(user) {
 
 export async function rejectUser(id) {
   if (!id) {
-    throw new Error("User ID is required.");
+    throw new Error(
+      "User ID is required."
+    );
   }
 
-  const { data, error } = await supabase
-    .from("users")
-    .update({
-      status: "Inactive",
-    })
-    .eq("id", id)
-    .select()
-    .single();
+  const { data, error } =
+    await supabase
+      .from("users")
+      .update({
+        status: "Inactive",
+      })
+      .eq("id", id)
+      .select()
+      .single();
 
   if (error) throw error;
 
@@ -494,6 +540,129 @@ export async function deleteUser(user) {
     throw new Error(
       data?.error ||
         "The account could not be deleted."
+    );
+  }
+
+  return data;
+}
+/*
+ * ============================================================
+ * SECURE ADMIN ACCOUNT UPDATE
+ * ============================================================
+ *
+ * Used by Administrator User Management when editing:
+ *
+ * - Full Name
+ * - Email
+ * - Employee ID
+ *
+ * Email changes must be handled through the secure
+ * update-user-account Supabase Edge Function so that:
+ *
+ * - Supabase Auth email
+ * - public.users.email
+ *
+ * remain synchronized.
+ *
+ * The existing updateUser() function remains unchanged
+ * because it is still used for normal public.users updates.
+ * ============================================================
+ */
+
+export async function updateUserAccount({
+  userId,
+  fullName,
+  email,
+  employeeId,
+}) {
+  const normalizedUserId =
+    String(
+      userId ?? ""
+    ).trim();
+
+  const normalizedFullName =
+    String(
+      fullName ?? ""
+    ).trim();
+
+  const normalizedEmail =
+    String(
+      email ?? ""
+    )
+      .trim()
+      .toLowerCase();
+
+  const normalizedEmployeeId =
+    String(
+      employeeId ?? ""
+    ).trim();
+
+  if (!normalizedUserId) {
+    throw new Error(
+      "User ID is required."
+    );
+  }
+
+  if (!normalizedFullName) {
+    throw new Error(
+      "Full name is required."
+    );
+  }
+
+  if (!normalizedEmail) {
+    throw new Error(
+      "Email is required."
+    );
+  }
+
+  const {
+    data,
+    error,
+  } = await supabase.functions.invoke(
+    "update-user-account",
+    {
+      body: {
+        userId:
+          normalizedUserId,
+
+        fullName:
+          normalizedFullName,
+
+        email:
+          normalizedEmail,
+
+        employeeId:
+          normalizedEmployeeId,
+      },
+    }
+  );
+
+  if (error) {
+    let message =
+      error.message ||
+      "The secure account update request failed.";
+
+    try {
+      const details =
+        await error.context?.json();
+
+      message =
+        details?.error ||
+        details?.message ||
+        message;
+    } catch {
+      // Keep the original Edge Function error message.
+    }
+
+    throw new Error(
+      message
+    );
+  }
+
+  if (!data?.success) {
+    throw new Error(
+      data?.error ||
+        "The account could not be updated."
     );
   }
 

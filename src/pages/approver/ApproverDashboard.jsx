@@ -351,6 +351,165 @@ const paymentStatusClass = (status) => {
   }
 };
 
+/*
+|--------------------------------------------------------------------------
+| RESPONSIBILITY CARD (My Classes & Responsibilities)
+|--------------------------------------------------------------------------
+*/
+
+const CARD_THEME = {
+  blue: {
+    bar: "bg-blue-600",
+    iconIdle: "bg-blue-50 text-blue-700",
+    iconActive: "bg-blue-700 text-white",
+    activeCard:
+      "border-blue-300 bg-blue-50/60 ring-2 ring-blue-100 shadow-md shadow-blue-100/60",
+    progress: "bg-blue-600",
+  },
+  violet: {
+    bar: "bg-violet-600",
+    iconIdle: "bg-violet-50 text-violet-700",
+    iconActive: "bg-violet-700 text-white",
+    activeCard:
+      "border-violet-300 bg-violet-50/60 ring-2 ring-violet-100 shadow-md",
+    progress: "bg-violet-600",
+  },
+  cyan: {
+    bar: "bg-cyan-600",
+    iconIdle: "bg-cyan-50 text-cyan-700",
+    iconActive: "bg-cyan-700 text-white",
+    activeCard:
+      "border-cyan-300 bg-cyan-50/60 ring-2 ring-cyan-100 shadow-md shadow-cyan-100/60",
+    progress: "bg-cyan-600",
+  },
+};
+
+function ResponsibilityCard({
+  theme = "blue",
+  icon,
+  eyebrow,
+  title,
+  description,
+  pending = 0,
+  stats = [],
+  progress = null,
+  active = false,
+  onClick,
+  footer = null,
+}) {
+  const t = CARD_THEME[theme] || CARD_THEME.blue;
+
+  return (
+    <motion.div
+      layout
+      whileHover={{ y: -2 }}
+      transition={{ duration: 0.15 }}
+      className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-white transition ${
+        active
+          ? t.activeCard
+          : "border-slate-200 hover:border-slate-300 hover:shadow-md"
+      }`}
+    >
+      <span
+        className={`absolute inset-y-0 left-0 w-1 ${t.bar} ${
+          active
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-60"
+        } transition`}
+      />
+
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        className="flex-1 p-4 pl-5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <span
+              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg transition ${
+                active ? t.iconActive : t.iconIdle
+              }`}
+            >
+              {icon}
+            </span>
+
+            <div className="min-w-0">
+              <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">
+                {eyebrow}
+              </p>
+              <h3 className="mt-0.5 truncate text-base font-black text-slate-900">
+                {title}
+              </h3>
+              <p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-500">
+                {description}
+              </p>
+            </div>
+          </div>
+
+          {pending > 0 ? (
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-black text-amber-800">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+              </span>
+              {pending} pending
+            </span>
+          ) : (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+              <FaCheckCircle className="text-[10px]" />
+              All clear
+            </span>
+          )}
+        </div>
+
+        {stats.length > 0 && (
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            {stats.map((stat) => (
+              <div
+                key={stat.label}
+                className="rounded-lg bg-slate-50 px-2.5 py-2 text-center"
+              >
+                <p className="text-lg font-black leading-none text-slate-900">
+                  {stat.value}
+                </p>
+                <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                  {stat.label}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {progress !== null && (
+          <div className="mt-3">
+            <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-500">
+              <span>Clearance progress</span>
+              <span className="text-slate-700">
+                {progress}%
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${progress}%` }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                className={`h-full rounded-full ${t.progress}`}
+              />
+            </div>
+          </div>
+        )}
+      </button>
+
+      {footer && (
+        <div className="border-t border-slate-100 bg-slate-50/60 p-3 pl-5">
+          {footer}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
 function ApproverDashboard() {
   const location =
     useLocation();
@@ -397,6 +556,39 @@ function ApproverDashboard() {
   const [selectedSubmission, setSelectedSubmission] =
     useState(null);
 
+  const [officeAnswerReview, setOfficeAnswerReview] = useState({ loading: false, error: "", mode: null, requirements: [], answers: [] });
+
+  useEffect(() => {
+    const step = selectedSubmission;
+    if (!step || step.targetType !== "Office" || !step.office_id) {
+      setOfficeAnswerReview({ loading: false, error: "", mode: null, requirements: [], answers: [] });
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      setOfficeAnswerReview({ loading: true, error: "", mode: null, requirements: [], answers: [] });
+      try {
+        const [settings, requirements] = await Promise.all([
+          supabase.from("office_submission_settings").select("approval_mode").eq("office_id", step.office_id).maybeSingle(),
+          supabase.from("office_requirements").select("id, title, description, requirement_type, response_type, is_required, is_active").eq("office_id", step.office_id).order("title"),
+        ]);
+        if (settings.error) throw settings.error;
+        if (requirements.error) throw requirements.error;
+        let answers = [];
+        if (step.submission?.id) {
+          const result = await supabase.from("office_requirement_answers").select("id, office_requirement_id, answer_text").eq("clearance_submission_id", step.submission.id);
+          if (result.error) throw result.error;
+          answers = result.data || [];
+        }
+        if (!cancelled) setOfficeAnswerReview({ loading: false, error: "", mode: settings.data?.approval_mode || null, requirements: requirements.data || [], answers });
+      } catch (error) {
+        if (!cancelled) setOfficeAnswerReview({ loading: false, error: error?.message || "Unable to load office answers", mode: null, requirements: [], answers: [] });
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [selectedSubmission?.id, selectedSubmission?.submission?.id, selectedSubmission?.office_id, selectedSubmission?.targetType]);
+
   const [selectedStudentOverview, setSelectedStudentOverview] =
     useState(null);
 
@@ -426,6 +618,15 @@ function ApproverDashboard() {
 
   const [isFinancialApprover, setIsFinancialApprover] =
     useState(false);
+
+  const [officeResponsibilities, setOfficeResponsibilities] =
+    useState([]);
+
+  const [adviserSections, setAdviserSections] =
+    useState([]);
+
+  const [adviserPendingCount, setAdviserPendingCount] =
+    useState(0);
 
   const [treasurerStatusFilter, setTreasurerStatusFilter] =
     useState("All");
@@ -624,7 +825,8 @@ function ApproverDashboard() {
           is_active,
           offices (
             id,
-            office_name
+            office_name,
+            office_code
           )
         `)
         .eq("approver_id", approverProfile.id)
@@ -640,7 +842,9 @@ function ApproverDashboard() {
 
         setIsRegistrarVerifier(false);
         setIsFinancialApprover(false);
+        setOfficeResponsibilities([]);
       } else {
+        setOfficeResponsibilities(officeAssignments || []);
         const hasRegistrarAssignment = (
           officeAssignments || []
         ).some((assignment) =>
@@ -665,6 +869,43 @@ function ApproverDashboard() {
         setIsFinancialApprover(
           hasFinancialAssignment
         );
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | LOAD FACULTY ADVISER RESPONSIBILITY
+      |--------------------------------------------------------------------------
+      |
+      | Adviser responsibility is assignment-based through sections.adviser_id.
+      | It stays separate from office responsibilities and normal teaching work.
+      |--------------------------------------------------------------------------
+      */
+
+      const {
+        data: adviserSectionRows,
+        error: adviserSectionError,
+      } = await supabase
+        .from("sections")
+        .select(`
+          id,
+          course,
+          year_level,
+          block_code,
+          school_year,
+          semester,
+          is_active
+        `)
+        .eq("adviser_id", approverProfile.id)
+        .eq("is_active", true);
+
+      if (adviserSectionError) {
+        console.warn(
+          "Unable to load Faculty Adviser responsibility:",
+          adviserSectionError
+        );
+        setAdviserSections([]);
+      } else {
+        setAdviserSections(adviserSectionRows || []);
       }
 
       /*
@@ -723,6 +964,7 @@ function ApproverDashboard() {
           subject_id,
           class_offering_id,
           approver_id,
+          step_type,
           status,
           remarks,
           reviewed_at,
@@ -742,6 +984,14 @@ function ApproverDashboard() {
       if (stepError) throw stepError;
 
       const safeSteps = steps || [];
+
+      setAdviserPendingCount(
+        safeSteps.filter(
+          (step) =>
+            step.step_type === "Adviser" &&
+            step.status === "Pending"
+        ).length
+      );
 
       const requestIds = uniqueIds(
         safeSteps.map(
@@ -1023,70 +1273,70 @@ function ApproverDashboard() {
 
       let submissions = [];
 
-if (stepIds.length > 0) {
-  const {
-    data,
-    error,
-  } = await supabase
-    .from("clearance_submissions")
-    .select(`
-      id,
-      clearance_step_id,
-      student_id,
-      submission_text,
-      attachment_url,
-      attachment_name,
-      version,
-      is_current,
-      submitted_at,
-      updated_at
-    `)
-    .in("clearance_step_id", stepIds)
-    .eq("is_current", true);
+      if (stepIds.length > 0) {
+        const {
+          data,
+          error,
+        } = await supabase
+          .from("clearance_submissions")
+          .select(`
+            id,
+            clearance_step_id,
+            student_id,
+            submission_text,
+            attachment_url,
+            attachment_name,
+            version,
+            is_current,
+            submitted_at,
+            updated_at
+          `)
+          .in("clearance_step_id", stepIds)
+          .eq("is_current", true);
 
-  if (error) throw error;
+        if (error) throw error;
 
-  const rawSubmissions = data || [];
+        const rawSubmissions = data || [];
 
-  submissions = await Promise.all(
-    rawSubmissions.map(async (submission) => {
-      if (!submission.attachment_url) {
-        return {
-          ...submission,
-          signed_url: null,
-        };
-      }
+        submissions = await Promise.all(
+          rawSubmissions.map(async (submission) => {
+            if (!submission.attachment_url) {
+              return {
+                ...submission,
+                signed_url: null,
+              };
+            }
 
-      const {
-        data: signedUrlData,
-        error: signedUrlError,
-      } = await supabase.storage
-        .from(STORAGE_BUCKET)
-        .createSignedUrl(
-          submission.attachment_url,
-          60 * 10
+            const {
+              data: signedUrlData,
+              error: signedUrlError,
+            } = await supabase.storage
+              .from(STORAGE_BUCKET)
+              .createSignedUrl(
+                submission.attachment_url,
+                60 * 10
+              );
+
+            if (signedUrlError) {
+              console.warn(
+                "Unable to create attachment signed URL:",
+                signedUrlError
+              );
+
+              return {
+                ...submission,
+                signed_url: null,
+              };
+            }
+
+            return {
+              ...submission,
+              signed_url:
+                signedUrlData?.signedUrl || null,
+            };
+          })
         );
-
-      if (signedUrlError) {
-        console.warn(
-          "Unable to create attachment signed URL:",
-          signedUrlError
-        );
-
-        return {
-          ...submission,
-          signed_url: null,
-        };
       }
-
-      return {
-        ...submission,
-        signed_url:
-          signedUrlData?.signedUrl || null,
-      };
-    })
-  );
-}
 
       /*
       |--------------------------------------------------------------------------
@@ -1291,6 +1541,12 @@ if (stepIds.length > 0) {
 
       const enrichedSteps = safeSteps
         .map((step) => {
+          // Adviser clearance is handled by the dedicated Adviser responsibility page.
+          // Do not mix it into Subject or Office queues on the Faculty dashboard.
+          if (step.step_type === "Adviser") {
+            return null;
+          }
+
           const request = requestMap.get(
             step.clearance_request_id
           );
@@ -2057,17 +2313,17 @@ if (stepIds.length > 0) {
         )
       ) {
         block.targetsMap.set(
-  step.targetKey,
-  {
-    key: step.targetKey,
-    type: step.targetType,
-    name: step.targetName,
-    code: step.targetCode,
-    classOfferingId:
-      step.classOfferingId || null,
-    items: [],
-  }
-);
+          step.targetKey,
+          {
+            key: step.targetKey,
+            type: step.targetType,
+            name: step.targetName,
+            code: step.targetCode,
+            classOfferingId:
+              step.classOfferingId || null,
+            items: [],
+          }
+        );
       }
 
       const target =
@@ -2646,6 +2902,72 @@ if (stepIds.length > 0) {
         step.category === "office" &&
         step.status === "Pending"
     ).length;
+
+  /*
+  |--------------------------------------------------------------------------
+  | RESPONSIBILITY STATS (CLASSES + OFFICES)
+  |--------------------------------------------------------------------------
+  */
+
+  const responsibilityStats = useMemo(() => {
+    const summarize = (steps) => {
+      const total = steps.length;
+      const approved = steps.filter(
+        (step) => step.status === "Approved"
+      ).length;
+
+      return {
+        total,
+        approved,
+        pending: steps.filter(
+          (step) => step.status === "Pending"
+        ).length,
+        rejected: steps.filter(
+          (step) => step.status === "Rejected"
+        ).length,
+        forReview: steps.filter(
+          (step) =>
+            step.status === "Pending" &&
+            Boolean(step.submission)
+        ).length,
+        students: new Set(
+          steps
+            .map((step) => step.student?.id)
+            .filter(Boolean)
+        ).size,
+        progress: total
+          ? Math.round((approved / total) * 100)
+          : 0,
+      };
+    };
+
+    const offices = {};
+
+    officeResponsibilities.forEach((assignment) => {
+      offices[assignment.id] = summarize(
+        assignedSteps.filter(
+          (step) =>
+            step.category === "office" &&
+            String(step.office_id || "") ===
+              String(assignment.office_id || "")
+        )
+      );
+    });
+
+    return {
+      classes: summarize(
+        assignedSteps.filter(
+          (step) => step.category !== "office"
+        )
+      ),
+      offices,
+    };
+  }, [assignedSteps, officeResponsibilities]);
+
+  const totalAttentionCount =
+    classPendingCount +
+    officePendingCount +
+    adviserPendingCount;
 
   /*
   |--------------------------------------------------------------------------
@@ -4989,10 +5311,10 @@ if (stepIds.length > 0) {
         ...rows.map((row) =>
           row.map(escapeCsv).join(",")
         ),
-      ].join("\\r\\n");
+      ].join("\r\n");
 
       const blob = new Blob(
-        ["\\uFEFF", csv],
+        ["\uFEFF", csv],
         {
           type: "text/csv;charset=utf-8;",
         }
@@ -5433,101 +5755,241 @@ if (stepIds.length > 0) {
         transition={{ duration: 0.35, ease: "easeOut" }}
         className="mb-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
       >
-        {/* Compact workspace toolbar */}
+        {/* Organized dashboard navigation */}
 
         <div className="border-b border-slate-200 bg-white p-4 lg:p-5">
-          <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+          <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-black uppercase tracking-wide text-blue-700">
-                Step 1 · Choose Workspace
+                Faculty Dashboard
               </div>
               <h2 className="mt-2 text-xl font-black text-slate-900">
-                Find the clearance queue you want to manage
+                My Classes &amp; Responsibilities
               </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Teaching classes and office clearances stay separated so student records do not get mixed.
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+                Pili ug workspace. Ang imong teaching classes ug dugang nga clearance responsibilities gibulag aron klaro ang trabaho.
               </p>
+            </div>
+
+            <div
+              className={`inline-flex w-fit items-center gap-3 rounded-2xl border px-4 py-3 ${
+                totalAttentionCount > 0
+                  ? "border-amber-200 bg-amber-50"
+                  : "border-emerald-200 bg-emerald-50"
+              }`}
+            >
+              <span
+                className={`inline-flex h-9 w-9 items-center justify-center rounded-xl text-base ${
+                  totalAttentionCount > 0
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-emerald-100 text-emerald-700"
+                }`}
+              >
+                {totalAttentionCount > 0 ? (
+                  <FaClipboardList />
+                ) : (
+                  <FaCheckCircle />
+                )}
+              </span>
+              <div>
+                <p
+                  className={`text-lg font-black leading-none ${
+                    totalAttentionCount > 0
+                      ? "text-amber-800"
+                      : "text-emerald-800"
+                  }`}
+                >
+                  {totalAttentionCount}
+                </p>
+                <p className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-500">
+                  {totalAttentionCount > 0
+                    ? "Needs your action"
+                    : "Nothing pending"}
+                </p>
+              </div>
             </div>
           </div>
 
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
-            <div className="inline-flex w-full shrink-0 rounded-xl bg-slate-100 p-1 xl:w-auto">
-              {[
-                {
-                  key: "class",
-                  label: "Teaching Classes",
-                  icon: <FaBookOpen />,
-                  count: classBlocks.length,
-                  pending: classPendingCount,
-                },
-                {
-                  key: "office",
-                  label: "Office Clearance",
-                  icon: <FaBuilding />,
-                  count: officeBlocks.length,
-                  pending: officePendingCount,
-                },
-              ].map((workspace) => {
-                const isActive = workspaceMode === workspace.key;
+          {classBlocks.length === 0 &&
+          adviserSections.length === 0 &&
+          officeResponsibilities.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+              <FaUsers className="mx-auto text-3xl text-slate-300" />
+              <p className="mt-3 font-bold text-slate-700">
+                Wala pay assignment
+              </p>
+              <p className="mt-1 text-sm text-slate-500">
+                Kontaka ang administrator para sa class, adviser, o office assignment.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+              {/* My Classes */}
+              <ResponsibilityCard
+                theme="blue"
+                icon={<FaBookOpen />}
+                eyebrow="My Classes"
+                title="Subject Clearance"
+                description="Review students gikan sa subjects ug classes nga officially assigned nimo."
+                pending={classPendingCount}
+                active={workspaceMode === "class"}
+                stats={[
+                  { label: "Classes", value: classBlocks.length },
+                  {
+                    label: "Students",
+                    value: responsibilityStats.classes.students,
+                  },
+                  {
+                    label: "For review",
+                    value: responsibilityStats.classes.forReview,
+                  },
+                ]}
+                progress={
+                  responsibilityStats.classes.total
+                    ? responsibilityStats.classes.progress
+                    : null
+                }
+                onClick={() => {
+                  setWorkspaceMode("class");
+                  setSelectedBlockKey(null);
+                  setSelectedTargetKey(null);
+                }}
+              />
+
+              {/* Faculty Adviser */}
+              {adviserSections.length > 0 && (
+                <ResponsibilityCard
+                  theme="violet"
+                  icon={<FaUserGraduate />}
+                  eyebrow="My Responsibilities"
+                  title="Faculty Adviser"
+                  description="Review clearance requests gikan sa blocks nga ikaw ang adviser."
+                  pending={adviserPendingCount}
+                  active={false}
+                  stats={[
+                    {
+                      label: "Blocks",
+                      value: adviserSections.length,
+                    },
+                    {
+                      label: "Pending",
+                      value: adviserPendingCount,
+                    },
+                    {
+                      label: "Courses",
+                      value: new Set(
+                        adviserSections.map(
+                          (section) => section.course
+                        )
+                      ).size,
+                    },
+                  ]}
+                  onClick={() => navigate("/approver/adviser")}
+                  footer={
+                    <span className="inline-flex items-center gap-1 text-xs font-black text-violet-700">
+                      Open Adviser page →
+                    </span>
+                  }
+                />
+              )}
+
+              {/* Office responsibilities */}
+              {officeResponsibilities.map((assignment) => {
+                const officeName =
+                  assignment.offices?.office_name ||
+                  "Office Clearance";
+
+                const officeCode =
+                  assignment.offices?.office_code || "";
+
+                const summary =
+                  responsibilityStats.offices[
+                    assignment.id
+                  ] || {
+                    total: 0,
+                    pending: 0,
+                    students: 0,
+                    forReview: 0,
+                    progress: 0,
+                  };
+
+                const openQueue = () => {
+                  setWorkspaceMode("office");
+                  setSelectedBlockKey(null);
+                  setSelectedTargetKey(null);
+                };
 
                 return (
-                  <button
-                    key={workspace.key}
-                    type="button"
-                    onClick={() => {
-                      setWorkspaceMode(workspace.key);
-                      setSelectedBlockKey(null);
-                      setSelectedTargetKey(null);
-                    }}
-                    className={`relative flex min-w-0 flex-1 items-center justify-center gap-2 overflow-hidden rounded-lg px-4 py-3 text-base font-semibold transition xl:flex-none ${
-                      isActive
-                        ? "text-white"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    {isActive && (
-                      <motion.span
-                        layoutId="approver-workspace-active"
-                        className="absolute inset-0 rounded-lg bg-slate-900 shadow-sm"
-                        transition={{ type: "spring", stiffness: 420, damping: 34 }}
-                      />
-                    )}
+                  <ResponsibilityCard
+                    key={assignment.id}
+                    theme="cyan"
+                    icon={<FaBuilding />}
+                    eyebrow={
+                      officeCode
+                        ? `Office • ${officeCode}`
+                        : "Office"
+                    }
+                    title={officeName}
+                    description="Dugang nga clearance responsibility nga gi-assign sa imong account."
+                    pending={summary.pending}
+                    active={workspaceMode === "office"}
+                    stats={[
+                      { label: "Students", value: summary.students },
+                      { label: "For review", value: summary.forReview },
+                      { label: "Total", value: summary.total },
+                    ]}
+                    progress={
+                      summary.total ? summary.progress : null
+                    }
+                    onClick={openQueue}
+                    footer={
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={openQueue}
+                          className="inline-flex flex-1 items-center justify-center rounded-xl bg-cyan-700 px-3 py-2 text-xs font-black text-white transition hover:bg-cyan-800"
+                        >
+                          Review Queue
+                        </button>
 
-                    <span className="relative z-10 text-sm">
-                      {workspace.icon}
-                    </span>
-
-                    <span className="relative z-10 truncate">
-                      {workspace.label}
-                    </span>
-
-                    <span
-                      className={`relative z-10 rounded-full px-2 py-0.5 text-sm ${
-                        isActive
-                          ? "bg-white/15 text-white"
-                          : "bg-white text-slate-600 shadow-sm"
-                      }`}
-                    >
-                      {workspace.count}
-                      {workspace.pending > 0
-                        ? ` · ${workspace.pending}`
-                        : ""}
-                    </span>
-                  </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigate(
+                              "/approver/office-requirements",
+                              {
+                                state: {
+                                  officeId:
+                                    assignment.office_id,
+                                  officeName,
+                                  officeCode,
+                                },
+                              }
+                            )
+                          }
+                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-white px-3 py-2 text-xs font-black text-cyan-700 transition hover:bg-cyan-50"
+                        >
+                          <FaClipboardList />
+                          Requirements / Questions
+                        </button>
+                      </div>
+                    }
+                  />
                 );
               })}
             </div>
+          )}
 
+          <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-center">
             <div className="relative min-w-0 flex-1">
               <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-slate-400" />
-
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder={
                   workspaceMode === "office"
-                    ? "Search office queue, student, course, or block"
+                    ? "Search responsibility queue, student, course, or block"
                     : "Search class, subject, student, course, or block"
                 }
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-base text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:ring-4 focus:ring-slate-100"
@@ -5536,14 +5998,9 @@ if (stepIds.length > 0) {
               {searchTerm.trim() && studentSearchResults.length > 0 && (
                 <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-40 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
                   <div className="border-b border-slate-100 bg-slate-50 px-4 py-3">
-                    <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">
-                      Matching Students
-                    </p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      Click a student to view all subjects assigned to you.
-                    </p>
+                    <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">Matching Students</p>
+                    <p className="mt-1 text-xs text-slate-400">Click a student to view clearance items assigned to you.</p>
                   </div>
-
                   <div className="max-h-80 overflow-y-auto">
                     {studentSearchResults.map((result) => (
                       <button
@@ -5551,18 +6008,12 @@ if (stepIds.length > 0) {
                         type="button"
                         onClick={() => {
                           setSelectedStudentOverview(result);
-                          setSearchTerm(
-                            result.student?.full_name ||
-                              result.student?.student_id ||
-                              ""
-                          );
+                          setSearchTerm(result.student?.full_name || result.student?.student_id || "");
                         }}
                         className="flex w-full items-center justify-between gap-4 border-b border-slate-100 px-4 py-3 text-left transition last:border-b-0 hover:bg-blue-50"
                       >
                         <div className="min-w-0">
-                          <p className="truncate font-bold text-slate-900">
-                            {result.student?.full_name || "Unnamed Student"}
-                          </p>
+                          <p className="truncate font-bold text-slate-900">{result.student?.full_name || "Unnamed Student"}</p>
                           <p className="mt-1 truncate text-sm text-slate-500">
                             {result.student?.student_id || "No Student ID"}
                             {result.courseCode ? ` • ${result.courseCode}` : ""}
@@ -5570,15 +6021,11 @@ if (stepIds.length > 0) {
                             {result.blockCode ? ` • Block ${result.blockCode}` : ""}
                           </p>
                         </div>
-
                         <div className="shrink-0 text-right">
                           <p className="text-sm font-black text-blue-700">
-                            {result.subjectCount} subject
-                            {result.subjectCount !== 1 ? "s" : ""}
+                            {result.subjectCount} subject{result.subjectCount !== 1 ? "s" : ""}
                           </p>
-                          <p className="mt-1 text-xs text-slate-400">
-                            View assigned clearance
-                          </p>
+                          <p className="mt-1 text-xs text-slate-400">View assigned clearance</p>
                         </div>
                       </button>
                     ))}
@@ -5589,17 +6036,11 @@ if (stepIds.length > 0) {
 
             <button
               type="button"
-              onClick={() =>
-                setShowHiddenBlocks((current) => !current)
-              }
+              onClick={() => setShowHiddenBlocks((current) => !current)}
               className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-base font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
             >
               {showHiddenBlocks ? <FaEye /> : <FaEyeSlash />}
-              <span>
-                {showHiddenBlocks
-                  ? "Hide archived"
-                  : `Archived (${hiddenBlocks.length})`}
-              </span>
+              <span>{showHiddenBlocks ? "Hide archived" : `Archived (${hiddenBlocks.length})`}</span>
             </button>
           </div>
         </div>
@@ -5613,18 +6054,15 @@ if (stepIds.length > 0) {
             <div className="border-b border-slate-200 px-5 py-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-slate-200/70 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-slate-600">
-                    Step 2 · Select Group
-                  </div>
                   <h2 className="text-lg font-black text-slate-900">
                     {workspaceMode === "office"
-                      ? "Office Queues"
+                      ? "Student Groups"
                       : "My Classes"}
                   </h2>
 
                   <p className="mt-1 text-sm leading-5 text-slate-500">
                     {workspaceMode === "office"
-                      ? "Select a student clearance queue"
+                      ? "Choose a block to review"
                       : "Choose a year level, course, and block"}
                   </p>
                 </div>
@@ -6105,26 +6543,39 @@ if (stepIds.length > 0) {
                           className="mb-2 block text-sm font-bold uppercase tracking-[0.1em] text-slate-500"
                         >
                           {selectedBlock.category === "office"
-                            ? "Office queue"
+                            ? "Responsibility"
                             : "Subject to review"}
                         </label>
 
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                          <select
-                            id="approverTargetSelect"
-                            value={selectedTargetKey || ""}
-                            onChange={(event) =>
-                              setSelectedTargetKey(event.target.value)
-                            }
-                            className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
-                          >
-                            {selectedBlock.targets.map((target) => (
-                              <option key={target.key} value={target.key}>
-                                {target.code ? `${target.code} — ` : ""}
-                                {target.name}
-                              </option>
-                            ))}
-                          </select>
+                          {selectedBlock.category === "office" &&
+                          selectedBlock.targets.length === 1 ? (
+                            <div className="min-w-0 flex-1 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
+                              <p className="truncate text-base font-black text-slate-900">
+                                {selectedTarget?.code ? `${selectedTarget.code} — ` : ""}
+                                {selectedTarget?.name || "Assigned responsibility"}
+                              </p>
+                              <p className="mt-0.5 text-xs font-semibold text-slate-500">
+                                Your assigned clearance responsibility
+                              </p>
+                            </div>
+                          ) : (
+                            <select
+                              id="approverTargetSelect"
+                              value={selectedTargetKey || ""}
+                              onChange={(event) =>
+                                setSelectedTargetKey(event.target.value)
+                              }
+                              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+                            >
+                              {selectedBlock.targets.map((target) => (
+                                <option key={target.key} value={target.key}>
+                                  {target.code ? `${target.code} — ` : ""}
+                                  {target.name}
+                                </option>
+                              ))}
+                            </select>
+                          )}
 
                           <div className="flex shrink-0 items-center gap-2 text-sm">
                             <span className="rounded-lg bg-slate-100 px-3 py-2 font-semibold text-slate-600">
@@ -6317,14 +6768,13 @@ if (stepIds.length > 0) {
                   <div className="px-5 py-4 lg:px-6">
                     <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-blue-700">
-                          Step 4 · Review Students
-                        </div>
                         <h3 className="text-lg font-black text-slate-900">
-                          Student Review Queue
+                          {workspaceMode === "office" ? "Students" : "Student Review Queue"}
                         </h3>
                         <p className="mt-0.5 text-sm text-slate-500">
-                          Review submissions and record the official decision.
+                          {workspaceMode === "office"
+                            ? "Review each student and record your decision."
+                            : "Review submissions and record the official decision."}
                         </p>
                       </div>
 
@@ -6333,11 +6783,15 @@ if (stepIds.length > 0) {
                       </span>
                     </div>
 
-                    <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className={`mb-5 border border-slate-200 ${workspaceMode === "office" ? "rounded-xl bg-white p-3" : "rounded-2xl bg-slate-50 p-4"}`}>
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <div>
-                          <p className="text-sm font-black text-slate-800">Filter and sort this clearance</p>
-                          <p className="mt-0.5 text-xs text-slate-500">Show only the students you need to work on right now.</p>
+                          <p className="text-sm font-black text-slate-800">
+                            {workspaceMode === "office" ? "View students" : "Filter and sort this clearance"}
+                          </p>
+                          {workspaceMode !== "office" && (
+                            <p className="mt-0.5 text-xs text-slate-500">Show only the students you need to work on right now.</p>
+                          )}
                         </div>
                         {(reviewStatusFilter !== "All" || reviewSubmissionFilter !== "All" || reviewSort !== "priority") && (
                           <button
@@ -7171,6 +7625,40 @@ if (stepIds.length > 0) {
                   </div>
                 </div>
               </div>
+
+              {selectedSubmission.targetType === "Office" && !selectedSubmission.isFinancialOffice && (
+                <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-5">
+                  <h3 className="font-bold text-slate-800">Office Questions &amp; Student Answers</h3>
+                  {officeAnswerReview.loading ? (
+                    <p className="mt-3 text-sm text-slate-600">Loading office answers...</p>
+                  ) : officeAnswerReview.error ? (
+                    <p role="alert" className="mt-3 text-sm text-red-700">Unable to load office answers: {officeAnswerReview.error}</p>
+                  ) : officeAnswerReview.mode !== "requirements" ? (
+                    <p className="mt-3 text-sm text-slate-600">This office uses direct verification. No questionnaire is required.</p>
+                  ) : officeAnswerReview.requirements.length === 0 ? (
+                    <p className="mt-3 text-sm text-amber-700">No office questions are available.</p>
+                  ) : (
+                    <div className="mt-4 space-y-3">
+                      {officeAnswerReview.requirements.map((requirement, index) => {
+                        const answer = officeAnswerReview.answers.find((entry) => entry.office_requirement_id === requirement.id);
+                        return (
+                          <div key={requirement.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <p className="font-semibold text-slate-800">{index + 1}. {requirement.title}</p>
+                              <span className="text-xs font-semibold text-slate-500">{requirement.is_required ? "Required" : "Optional"}{!requirement.is_active ? " · Inactive" : ""}</span>
+                            </div>
+                            {requirement.description && <p className="mt-1 whitespace-pre-wrap text-sm text-slate-500">{requirement.description}</p>}
+                            <div className="mt-3 rounded-lg bg-slate-50 p-3">
+                              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Student Answer</p>
+                              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-800">{answer?.answer_text?.trim() || "No answer recorded for this submission."}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="rounded-2xl bg-slate-50 p-5">
                 <p className="text-sm font-bold text-slate-700">

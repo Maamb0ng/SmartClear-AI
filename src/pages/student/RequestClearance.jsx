@@ -85,7 +85,19 @@ const formatDate = (date) => {
   );
 };
 
+const isAdviserStep = (step) => {
+  return (
+    String(step?.step_type || "")
+      .trim()
+      .toLowerCase() === "adviser"
+  );
+};
+
 const getStepName = (step) => {
+  if (isAdviserStep(step)) {
+    return "Faculty Adviser";
+  }
+
   if (step?.subjects?.subject_name) {
     return step.subjects.subject_name;
   }
@@ -98,6 +110,10 @@ const getStepName = (step) => {
 };
 
 const getStepCode = (step) => {
+  if (isAdviserStep(step)) {
+    return "Block Adviser";
+  }
+
   return (
     step?.subjects?.subject_code ||
     step?.offices?.office_code ||
@@ -106,6 +122,10 @@ const getStepCode = (step) => {
 };
 
 const getStepType = (step) => {
+  if (isAdviserStep(step)) {
+    return "Adviser";
+  }
+
   return step?.subject_id
     ? "Subject"
     : "Office";
@@ -201,8 +221,12 @@ const stepAllowsFile = (step) => {
 const isSubmissionWindowOpen = (
   step
 ) => {
+  if (isAdviserStep(step)) {
+    return false;
+  }
+
   if (!step?.subject_id) {
-    return true;
+    return !getSubmissionBlockedReason(step);
   }
 
   const requirement =
@@ -223,7 +247,79 @@ const isSubmissionWindowOpen = (
 const getSubmissionBlockedReason = (
   step
 ) => {
+  if (isAdviserStep(step)) {
+    return {
+      key: "faculty-review",
+
+      title: "Faculty Adviser Review",
+
+      message:
+        "No student submission is required for this step. Your assigned Faculty Adviser will review and clear your adviser requirement directly.",
+    };
+  }
+
   if (!step?.subject_id) {
+    const settings = step.officeSubmissionSetting;
+    const mode = settings?.approval_mode || "direct";
+    if (mode === "direct" || mode === "manual") {
+      return {
+        key: "office-review",
+        title: mode === "direct" ? "Office Direct Approval" : "Office Manual Verification",
+        message: "No student submission is required. The assigned office approver will review and approve this clearance step.",
+      };
+    }
+    if (!step.officeRequirements?.length) {
+      return {
+        key: "office-no-items",
+        title: "Waiting for Office Requirements",
+        message: "The office has not published active requirements or questions yet.",
+      };
+    }
+    if (!settings?.submission_enabled) {
+      return {
+        key: "office-closed",
+        title: "Office Submission Closed",
+        message: "The office has not opened student submission yet.",
+      };
+    }
+    const now = Date.now();
+    if (settings.opens_at && now < new Date(settings.opens_at).getTime()) {
+      return {
+        key: "office-upcoming",
+        title: "Submission Not Yet Open",
+        message: `The office will open submissions on ${new Date(settings.opens_at).toLocaleString()}.`,
+      };
+    }
+    if (settings.closes_at && now >= new Date(settings.closes_at).getTime()) {
+      return {
+        key: "office-deadline",
+        title: "Submission Deadline Passed",
+        message: `The office submission deadline was ${new Date(settings.closes_at).toLocaleString()}.`,
+      };
+    }
+    // The server remains authoritative for batch membership and timing.
+    // The local check is only for user feedback, not authorization.
+    if (step.officeBatch) {
+      const batch = step.officeBatch;
+      if (String(batch.status || "").trim().toLowerCase() !== "open") {
+        return { key: "office-batch-closed", title: "Office Batch Closed", message: "Your assigned office batch is not open." };
+      }
+      if (!batch.schedule_date || !batch.start_time || !batch.end_time) {
+        return { key: "office-batch-unscheduled", title: "Batch Schedule Missing", message: "The assigned office batch has no complete schedule." };
+      }
+      const start = Date.parse(`${batch.schedule_date}T${batch.start_time}+08:00`);
+      const end = Date.parse(`${batch.schedule_date}T${batch.end_time}+08:00`);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+        return { key: "office-batch-invalid", title: "Invalid Batch Schedule", message: "Contact the office to correct this batch schedule." };
+      }
+      if (now < start) {
+        return { key: "office-batch-upcoming", title: "Batch Not Yet Open", message: "Your office batch submission time has not started." };
+      }
+      if (now >= end) {
+        return { key: "office-batch-ended", title: "Batch Schedule Ended", message: "Your assigned office batch submission time has ended." };
+      }
+    }
+    // Offices without batch scheduling are validated by the backend.
     return null;
   }
 
@@ -968,6 +1064,9 @@ function RequestClearance() {
     setSubmissionText,
   ] = useState("");
 
+  // Answers are submitted atomically through the validated office RPC.
+  const [officeAnswers, setOfficeAnswers] = useState({});
+
   const [
     selectedFile,
     setSelectedFile,
@@ -1135,6 +1234,7 @@ function RequestClearance() {
               office_id,
               subject_id,
               class_offering_id,
+              step_type,
               approver_id,
               status,
               remarks,
@@ -1199,6 +1299,7 @@ function RequestClearance() {
               clearance_request_id,
               office_id,
               subject_id,
+              step_type,
               approver_id,
               status,
               remarks,
@@ -1666,6 +1767,69 @@ function RequestClearance() {
 
         /*
         |--------------------------------------------------------------------------
+        | LOAD ACTIVE OFFICE REQUIREMENTS / QUESTIONS
+        |--------------------------------------------------------------------------
+        */
+
+        let officeRequirements = [];
+        const officeIds = [...new Set(safeSteps.map((step) => step.office_id).filter(Boolean))];
+
+        if (officeIds.length > 0) {
+          const { data: officeRequirementData, error: officeRequirementError } =
+            await supabase
+              .from("office_requirements")
+              .select("id, office_id, requirement_type, title, description, response_type, is_required, is_active, created_at")
+              .in("office_id", officeIds)
+              .eq("is_active", true)
+              .order("created_at", { ascending: true });
+
+          if (officeRequirementError) {
+            console.error("Unable to load office requirements:", officeRequirementError);
+          } else {
+            officeRequirements = officeRequirementData || [];
+          }
+        }
+
+        // Office batches are independent per office and attached to exact
+        // clearance steps. Missing assignments are not treated as permission.
+        let officeBatchAssignments = [];
+        const officeStepIds = safeSteps.filter((step) => step.office_id).map((step) => step.id);
+        if (officeStepIds.length > 0) {
+          const { data: batchData, error: batchError } = await supabase
+            .from("office_batch_students")
+            .select(`
+              id,
+              clearance_step_id,
+              office_batches (
+                id, office_id, batch_name, schedule_date,
+                start_time, end_time, note, status
+              )
+            `)
+            .in("clearance_step_id", officeStepIds);
+          if (batchError) {
+            console.error("Unable to load office batch assignments:", batchError);
+          } else {
+            officeBatchAssignments = batchData || [];
+          }
+        }
+
+        // Office approval modes and schedules are display-only until the
+        // server validates every office student submission.
+        let officeSubmissionSettings = [];
+        if (officeIds.length > 0) {
+          const { data: settingData, error: settingError } = await supabase
+            .from("office_submission_settings")
+            .select("office_id, approval_mode, submission_enabled, opens_at, closes_at")
+            .in("office_id", officeIds);
+          if (settingError) {
+            console.error("Unable to load office submission settings:", settingError);
+          } else {
+            officeSubmissionSettings = settingData || [];
+          }
+        }
+
+        /*
+        |--------------------------------------------------------------------------
         | LOAD CURRENT SUBMISSIONS
         |--------------------------------------------------------------------------
         */
@@ -1939,6 +2103,24 @@ function RequestClearance() {
         |--------------------------------------------------------------------------
         */
 
+        const officeBatchMap = new Map();
+        officeBatchAssignments.forEach((assignment) => {
+          const batch = assignment.office_batches;
+          if (batch && !officeBatchMap.has(assignment.clearance_step_id)) {
+            officeBatchMap.set(assignment.clearance_step_id, batch);
+          }
+        });
+
+        const officeSettingsMap = new Map(
+          officeSubmissionSettings.map((setting) => [setting.office_id, setting])
+        );
+        const officeRequirementMap = new Map();
+        officeRequirements.forEach((requirement) => {
+          const items = officeRequirementMap.get(requirement.office_id) || [];
+          items.push(requirement);
+          officeRequirementMap.set(requirement.office_id, items);
+        });
+
         const enrichedSteps =
           resolvedSteps
             .map((step) => {
@@ -2023,6 +2205,17 @@ function RequestClearance() {
                     step.class_offering_id &&
                       classOffering
                   ),
+
+                officeBatch: step.office_id
+                  ? officeBatchMap.get(step.id) || null
+                  : null,
+
+                officeSubmissionSetting: step.office_id
+                  ? officeSettingsMap.get(step.office_id) || null
+                  : null,
+                officeRequirements: step.office_id
+                  ? officeRequirementMap.get(step.office_id) || []
+                  : [],
 
                 subjectRequirement:
                   classOffering
@@ -2633,6 +2826,7 @@ function RequestClearance() {
       setSelectedFile(
         null
       );
+      setOfficeAnswers({});
     };
 
   const closeSubmissionModal =
@@ -2646,6 +2840,7 @@ function RequestClearance() {
       setSelectedStep(null);
 
       setSubmissionText("");
+      setOfficeAnswers({});
 
       setSelectedFile(null);
     };
@@ -2804,6 +2999,36 @@ function RequestClearance() {
         return;
       }
 
+      const isOfficeSubmission = Boolean(
+        selectedStep.office_id && !selectedStep.subject_id
+      );
+      const officeItems = isOfficeSubmission
+        ? (selectedStep.officeRequirements || [])
+        : [];
+      const normalizedOfficeAnswers = {};
+      if (isOfficeSubmission) {
+        for (const item of officeItems) {
+          const answer = String(officeAnswers[item.id] ?? "").trim();
+          const responseType = String(item.response_type || "").toLowerCase();
+          const isConfirmation = responseType === "check" || responseType === "checkbox";
+          if (item.is_required && (!answer || (isConfirmation && answer !== "Yes"))) {
+            await Swal.fire({
+              icon: "warning",
+              title: "Required Answer Missing",
+              text: isConfirmation
+                ? `Please check the confirmation: ${item.title}`
+                : `Please answer: ${item.title}`,
+            });
+            return;
+          }
+          if (answer.length > 10000) {
+            await Swal.fire({ icon: "warning", title: "Answer Too Long", text: `Maximum 10,000 characters: ${item.title}` });
+            return;
+          }
+          if (answer) normalizedOfficeAnswers[item.id] = answer;
+        }
+      }
+
       const allowsText =
         stepAllowsText(
           selectedStep
@@ -2849,6 +3074,7 @@ function RequestClearance() {
       }
 
       if (
+        !isOfficeSubmission &&
         allowsText &&
         !allowsFile &&
         !cleanText
@@ -2867,6 +3093,7 @@ function RequestClearance() {
       }
 
       if (
+        !isOfficeSubmission &&
         !allowsText &&
         allowsFile &&
         !selectedFile
@@ -2885,6 +3112,7 @@ function RequestClearance() {
       }
 
       if (
+        !isOfficeSubmission &&
         allowsText &&
         allowsFile &&
         !cleanText &&
@@ -3006,31 +3234,20 @@ function RequestClearance() {
         |--------------------------------------------------------------------------
         */
 
-        const {
-          data,
-
-          error:
-            submissionError,
-        } =
-          await supabase.rpc(
-            "submit_clearance_requirement",
-            {
-              p_step_id:
-                selectedStep.id,
-
-              p_submission_text:
-                cleanText ||
-                null,
-
-              p_attachment_url:
-                uploadedFilePath ||
-                null,
-
-              p_attachment_name:
-                selectedFile?.name ||
-                null,
-            }
-          );
+        const { data, error: submissionError } = isOfficeSubmission
+          ? await supabase.rpc("submit_office_clearance_answers", {
+              p_step_id: selectedStep.id,
+              p_answers: normalizedOfficeAnswers,
+              p_submission_text: cleanText || null,
+              p_attachment_url: uploadedFilePath || null,
+              p_attachment_name: selectedFile?.name || null,
+            })
+          : await supabase.rpc("submit_clearance_requirement", {
+              p_step_id: selectedStep.id,
+              p_submission_text: cleanText || null,
+              p_attachment_url: uploadedFilePath || null,
+              p_attachment_name: selectedFile?.name || null,
+            });
 
         if (
           submissionError
@@ -3059,6 +3276,7 @@ function RequestClearance() {
         setSubmissionText(
           ""
         );
+        setOfficeAnswers({});
 
         setSelectedFile(
           null
@@ -4462,7 +4680,9 @@ function RequestClearance() {
                         <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                           <div className="flex min-w-0 items-start gap-3 sm:gap-4">
                             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-xl text-blue-700 sm:h-14 sm:w-14 sm:rounded-2xl sm:text-2xl">
-                              {step.subject_id ? (
+                              {isAdviserStep(step) ? (
+                                <FaUserCheck />
+                              ) : step.subject_id ? (
                                 <FaBook />
                               ) : (
                                 <FaBuilding />
@@ -4686,6 +4906,81 @@ function RequestClearance() {
                             )}
                           </div>
                         )}
+
+                        {/* INDEPENDENT OFFICE BATCH SCHEDULE (DISPLAY ONLY) */}
+                        {!step.subject_id && !guidanceStep && step.office_id && (
+                          <div className="mt-5 rounded-xl border border-violet-200 bg-violet-50 p-4 sm:p-5">
+                            <h4 className="font-bold text-slate-800">Office Batch Assignment</h4>
+                            {step.officeBatch ? (() => {
+                              const batch = step.officeBatch;
+                              const start = batch.schedule_date && batch.start_time
+                                ? new Date(`${batch.schedule_date}T${batch.start_time}`)
+                                : null;
+                              const end = batch.schedule_date && batch.end_time
+                                ? new Date(`${batch.schedule_date}T${batch.end_time}`)
+                                : null;
+                              const now = new Date();
+                              const active = String(batch.status || "").toLowerCase() === "open";
+                              const state = !active ? "Closed"
+                                : (end && now > end) ? "Schedule Ended"
+                                : (start && now < start) ? "Upcoming"
+                                : (start && end && now >= start && now <= end) ? "Scheduled Now"
+                                : "Schedule Unavailable";
+                              return (
+                                <div className="mt-3 space-y-2 text-sm text-slate-700">
+                                  <p><span className="font-semibold">Batch:</span> {batch.batch_name}</p>
+                                  <p><span className="font-semibold">Date:</span> {batch.schedule_date || "Not scheduled"}</p>
+                                  <p><span className="font-semibold">Time:</span> {batch.start_time || "—"} – {batch.end_time || "—"}</p>
+                                  <p><span className="font-semibold">Schedule status:</span> {state}</p>
+                                  {batch.note && <p><span className="font-semibold">Office note:</span> {batch.note}</p>}
+                                  <p className="text-xs text-violet-800">Submission is allowed only when the office and server-side batch checks pass.</p>
+                                </div>
+                              );
+                            })() : (
+                              <p className="mt-2 text-sm text-violet-800">
+                                Waiting for Batch Assignment. Contact this office if batch scheduling is required.
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* OFFICE REQUIREMENTS AND QUESTIONS */}
+                        {!step.subject_id && !guidanceStep &&
+                          step.officeRequirements?.length > 0 && (
+                            <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4 sm:p-5">
+                              <h4 className="font-bold text-slate-800">Office Requirements &amp; Questions</h4>
+                              <p className="mt-1 text-sm text-slate-600">
+                                These are the active instructions published by this office.
+                              </p>
+                              <div className="mt-4 space-y-3">
+                                {step.officeRequirements.map((item) => (
+                                  <div key={item.id} className="rounded-lg border border-blue-100 bg-white p-3">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="font-semibold text-slate-800">{item.title}</p>
+                                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">
+                                        {item.requirement_type === "Question" ? "Question" : "Requirement"}
+                                      </span>
+                                      {item.is_required && (
+                                        <span className="rounded-full bg-red-50 px-2 py-1 text-xs text-red-700">Required</span>
+                                      )}
+                                    </div>
+                                    {item.description && (
+                                      <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{item.description}</p>
+                                    )}
+                                    {item.requirement_type === "Question" && (
+                                      <p className="mt-2 text-xs text-blue-700">
+                                        {item.response_type === "yes-no"
+                                          ? "Select Yes or No when submitting this office requirement."
+                                          : item.response_type === "text"
+                                            ? "Enter your written answer when submitting this office requirement."
+                                            : "Complete the confirmation when submitting this office requirement."}
+                                      </p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
 
                         {/* TEACHER SUBJECT REQUIREMENT */}
 
@@ -5306,6 +5601,65 @@ function RequestClearance() {
                       }
                     </p>
                   </div>
+                )}
+
+              {/* Office question answers are submitted through submit_office_clearance_answers RPC. */}
+              {!selectedStep.subject_id &&
+                selectedStep.officeRequirements?.length > 0 && (
+                  <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 sm:p-5">
+                    <h3 className="font-bold text-slate-800">Office Questions &amp; Requirements</h3>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Answer the questions below. Required answers are checked before submission and validated again by the server.
+                    </p>
+                    <div className="mt-4 space-y-4">
+                      {selectedStep.officeRequirements.map((item) => {
+                        const kind = String(item.response_type || "").toLowerCase();
+                        const isYesNo = kind === "yes-no" || kind === "yes_no";
+                        const isCheckbox = kind === "checkbox" || kind === "check";
+                        return (
+                          <div key={item.id} className="rounded-xl border border-blue-100 bg-white p-4">
+                            <label htmlFor={`office-answer-${item.id}`} className="block text-sm font-semibold text-slate-800">
+                              {item.title}{item.is_required ? " *" : ""}
+                            </label>
+                            {item.description && (
+                              <p className="mt-1 whitespace-pre-wrap text-xs text-slate-600">{item.description}</p>
+                            )}
+                            {isYesNo ? (
+                              <select
+                                id={`office-answer-${item.id}`}
+                                value={officeAnswers[item.id] || ""}
+                                onChange={(event) => setOfficeAnswers((previous) => ({ ...previous, [item.id]: event.target.value }))}
+                                className="mt-3 w-full rounded-lg border border-slate-300 bg-white p-3 text-sm"
+                              >
+                                <option value="">Select an answer</option>
+                                <option value="Yes">Yes</option>
+                                <option value="No">No</option>
+                              </select>
+                            ) : isCheckbox ? (
+                              <label className="mt-3 flex items-center gap-3 text-sm text-slate-700">
+                                <input
+                                  id={`office-answer-${item.id}`}
+                                  type="checkbox"
+                                  checked={officeAnswers[item.id] === "Yes"}
+                                  onChange={(event) => setOfficeAnswers((previous) => ({ ...previous, [item.id]: event.target.checked ? "Yes" : "No" }))}
+                                />
+                                I confirm this requirement
+                              </label>
+                            ) : (
+                              <textarea
+                                id={`office-answer-${item.id}`}
+                                rows={3}
+                                value={officeAnswers[item.id] || ""}
+                                onChange={(event) => setOfficeAnswers((previous) => ({ ...previous, [item.id]: event.target.value }))}
+                                placeholder="Enter your answer"
+                                className="mt-3 w-full rounded-lg border border-slate-300 p-3 text-sm"
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
                 )}
 
               {stepAllowsText(

@@ -258,27 +258,29 @@ export async function getOfficeStudentQueue() {
     };
   }
 
-  const {
-    data: steps,
-    error: stepsError,
-  } = await supabase
-    .from("clearance_steps")
-    .select(`
-      id,
-      clearance_request_id,
-      office_id,
-      approver_id,
-      status,
-      remarks,
-      reviewed_at
-    `)
-    .in(
-      "office_id",
-      context.officeIds
-    );
+  // Fetch all pages: Supabase commonly limits each response to 1,000 rows.
+  // Preserve the existing office-based queue rules and all step statuses.
+  const steps = [];
+  const pageSize = 500;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error: stepsError } = await supabase
+      .from("clearance_steps")
+      .select(`
+        id,
+        clearance_request_id,
+        office_id,
+        approver_id,
+        status,
+        remarks,
+        reviewed_at
+      `)
+      .in("office_id", context.officeIds)
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
 
-  if (stepsError) {
-    throw stepsError;
+    if (stepsError) throw stepsError;
+    steps.push(...(data || []));
+    if (!data || data.length < pageSize) break;
   }
 
   const queueSteps = (
@@ -329,6 +331,14 @@ export async function getOfficeStudentQueue() {
 
   if (requestError) {
     throw requestError;
+  }
+
+  // Do not silently hide steps when related rows are blocked by RLS
+  // or have missing relationships: surface a useful diagnostic instead.
+  if ((requests || []).length < requestIds.length) {
+    const visibleIds = new Set((requests || []).map((item) => item.id));
+    const missing = requestIds.filter((id) => !visibleIds.has(id));
+    console.warn("Office queue: clearance requests not visible", missing);
   }
 
   const requestMap = new Map(
@@ -383,6 +393,14 @@ export async function getOfficeStudentQueue() {
     }
 
     students = data || [];
+  }
+
+  if (students.length < studentIds.length) {
+    const visibleIds = new Set(students.map((item) => item.id));
+    console.warn(
+      "Office queue: student profiles not visible",
+      studentIds.filter((id) => !visibleIds.has(id))
+    );
   }
 
   const studentMap = new Map(
@@ -589,6 +607,61 @@ export async function getOfficeStudentQueue() {
         };
       })
       .filter(Boolean);
+
+  // Attach real office batch assignments to queue rows.
+  // Match by clearance step (not just student) to avoid mixing offices.
+  const queueStepIds = mappedStudents.map((item) => item.stepId);
+  const batchAssignments = [];
+  for (let offset = 0; offset < queueStepIds.length; offset += 200) {
+    const { data, error } = await supabase
+      .from("office_batch_students")
+      .select("batch_id, clearance_step_id, assigned_at")
+      .in("clearance_step_id", queueStepIds.slice(offset, offset + 200));
+    if (error) throw error;
+    batchAssignments.push(...(data || []));
+  }
+
+  const batchIds = [...new Set(batchAssignments.map((row) => row.batch_id).filter(Boolean))];
+  const batchRows = [];
+  for (let offset = 0; offset < batchIds.length; offset += 200) {
+    const { data, error } = await supabase
+      .from("office_batches")
+      .select("id, office_id, batch_name, schedule_date, start_time, end_time, status")
+      .in("id", batchIds.slice(offset, offset + 200))
+      .in("office_id", context.officeIds);
+    if (error) throw error;
+    batchRows.push(...(data || []));
+  }
+
+  const batchById = new Map(batchRows.map((row) => [row.id, row]));
+  const assignmentByStep = new Map();
+  for (const assignment of batchAssignments) {
+    const batch = batchById.get(assignment.batch_id);
+    if (!batch) continue;
+    const existing = assignmentByStep.get(assignment.clearance_step_id);
+    if (!existing || String(assignment.assigned_at || "") > String(existing.assigned_at || "")) {
+      assignmentByStep.set(assignment.clearance_step_id, { ...assignment, batch });
+    }
+  }
+
+  for (const student of mappedStudents) {
+    const assignment = assignmentByStep.get(student.stepId);
+    if (!assignment) continue;
+    const batch = assignment.batch;
+    student.batch = {
+      id: batch.id,
+      name: batch.batch_name,
+      batchName: batch.batch_name,
+      date: batch.schedule_date,
+      scheduleDate: batch.schedule_date,
+      startTime: batch.start_time,
+      endTime: batch.end_time,
+      status: batch.status,
+      assignedAt: assignment.assigned_at,
+    };
+    student.schedule = batch.schedule_date;
+    student.time = batch.start_time;
+  }
 
   mappedStudents.sort(
     (a, b) => {
@@ -1088,6 +1161,7 @@ export async function getOfficeRequirements(
       description,
       response_type,
       is_required,
+      attachment_required,
       is_active,
       created_at,
       updated_at
@@ -1139,6 +1213,7 @@ export async function createOfficeRequirement({
   description = "",
   responseType = null,
   isRequired = false,
+  attachmentRequired = false,
   isActive = true,
 }) {
   const context =
@@ -1224,6 +1299,9 @@ export async function createOfficeRequirement({
       is_required:
         Boolean(isRequired),
 
+      attachment_required:
+        Boolean(attachmentRequired),
+
       is_active:
         Boolean(isActive),
 
@@ -1241,6 +1319,7 @@ export async function createOfficeRequirement({
       description,
       response_type,
       is_required,
+      attachment_required,
       is_active,
       created_at,
       updated_at
@@ -1267,6 +1346,7 @@ export async function updateOfficeRequirement({
   description,
   responseType,
   isRequired,
+  attachmentRequired,
   isActive,
 }) {
   if (!requirementId) {
@@ -1297,6 +1377,7 @@ export async function updateOfficeRequirement({
       description,
       response_type,
       is_required,
+      attachment_required,
       is_active
     `)
     .eq(
@@ -1385,6 +1466,11 @@ export async function updateOfficeRequirement({
           )
         : existing.is_required,
 
+    attachment_required:
+      attachmentRequired !== undefined
+        ? Boolean(attachmentRequired)
+        : existing.attachment_required ?? false,
+
     is_active:
       isActive !==
       undefined
@@ -1419,6 +1505,7 @@ export async function updateOfficeRequirement({
       description,
       response_type,
       is_required,
+      attachment_required,
       is_active,
       created_at,
       updated_at
@@ -1479,6 +1566,7 @@ export async function setOfficeRequirementStatus({
       description,
       response_type,
       is_required,
+      attachment_required,
       is_active,
       created_at,
       updated_at
@@ -1598,6 +1686,7 @@ export async function deleteOfficeRequirement(
         description,
         response_type,
         is_required,
+      attachment_required,
         is_active,
         created_at,
         updated_at
@@ -1816,6 +1905,7 @@ export async function getOfficeStudentReview(
       description,
       response_type,
       is_required,
+      attachment_required,
       is_active,
       created_at,
       updated_at
@@ -1837,6 +1927,54 @@ export async function getOfficeStudentReview(
 
   if (requirementError) {
     throw requirementError;
+  }
+
+  /*
+  =========================================================
+  STUDENT SUBMISSION FOR THIS EXACT OFFICE STEP
+  Read-only; existing review/approval workflow is unchanged.
+  =========================================================
+  */
+
+  const { data: currentSubmissions, error: submissionError } = await supabase
+    .from("clearance_submissions")
+    .select(`
+      id,
+      clearance_step_id,
+      student_id,
+      submission_text,
+      attachment_url,
+      attachment_name,
+      version,
+      is_current,
+      submitted_at,
+      updated_at
+    `)
+    .eq("clearance_step_id", step.id)
+    .eq("student_id", student.id)
+    .eq("is_current", true)
+    .order("submitted_at", { ascending: false })
+    .limit(1);
+
+  if (submissionError) {
+    throw submissionError;
+  }
+
+  let studentSubmission = currentSubmissions?.[0] || null;
+
+  if (studentSubmission?.attachment_url) {
+    const { data: signedData, error: signedError } = await supabase.storage
+      .from("clearance-requirements")
+      .createSignedUrl(studentSubmission.attachment_url, 60 * 10);
+
+    if (signedError) {
+      console.error("Unable to open office submission attachment:", signedError);
+    }
+
+    studentSubmission = {
+      ...studentSubmission,
+      signed_url: signedData?.signedUrl || null,
+    };
   }
 
   const requirementIds =
@@ -1881,6 +2019,28 @@ export async function getOfficeStudentReview(
     responses = data || [];
   }
 
+  // Student-provided answers belong to the latest submission,
+  // not to the office staff's review/verification responses.
+  let studentAnswers = [];
+
+  if (studentSubmission?.id && requirementIds.length) {
+    const { data: answerRows, error: answerError } = await supabase
+      .from("office_requirement_answers")
+      .select("id, clearance_submission_id, office_requirement_id, answer_text, created_at, updated_at")
+      .eq("clearance_submission_id", studentSubmission.id)
+      .in("office_requirement_id", requirementIds);
+
+    if (answerError) {
+      throw answerError;
+    }
+
+    studentAnswers = answerRows || [];
+  }
+
+  const studentAnswerMap = new Map(
+    studentAnswers.map((answer) => [answer.office_requirement_id, answer])
+  );
+
   const responseMap =
     new Map(
       responses.map(
@@ -1909,6 +2069,8 @@ export async function getOfficeStudentReview(
             response
               ?.response_value ??
             "",
+          // Read-only student answer for display in StudentDetails.jsx.
+          studentAnswer: studentAnswerMap.get(requirement.id)?.answer_text ?? null,
         };
       }
     );
@@ -2133,6 +2295,9 @@ export async function getOfficeStudentReview(
 
     requirements:
       mappedRequirements,
+
+    submission: studentSubmission,
+    studentSubmission,
 
     batch,
 
@@ -2715,32 +2880,19 @@ function normalizeTime(value) {
   return raw.slice(0, 8);
 }
 
-function ensureValidBatchTime(
-  startTime,
-  endTime
-) {
-  const start =
-    normalizeTime(startTime);
-
-  const end =
-    normalizeTime(endTime);
-
-  if (!start || !end) {
-    throw new Error(
-      "Start time and end time are required."
-    );
+function ensureValidBatchTime(startTime, endTime, scheduleDate, endDate) {
+  const start = normalizeTime(startTime);
+  const end = normalizeTime(endTime);
+  const firstDate = clean(scheduleDate);
+  const lastDate = clean(endDate || scheduleDate);
+  if (!start || !end) throw new Error("Start time and end time are required.");
+  if (!firstDate || !lastDate || lastDate < firstDate) {
+    throw new Error("End date must be on or after the start date.");
   }
-
-  if (end <= start) {
-    throw new Error(
-      "End time must be later than the start time."
-    );
+  if (lastDate === firstDate && end <= start) {
+    throw new Error("For a same-day batch, end time must be later than start time.");
   }
-
-  return {
-    start,
-    end,
-  };
+  return { start, end, endDate: lastDate };
 }
 
 async function getAuthorizedOfficeBatch(
@@ -2854,6 +3006,7 @@ export async function getOfficeBatches(
       created_by,
       batch_name,
       schedule_date,
+      end_date,
       start_time,
       end_time,
       note,
@@ -3041,6 +3194,7 @@ export async function createOfficeBatch({
   officeId = null,
   batchName,
   scheduleDate,
+  endDate = null,
   startTime,
   endTime,
   note = "",
@@ -3089,12 +3243,8 @@ export async function createOfficeBatch({
     );
   }
 
-  const {
-    start,
-    end,
-  } = ensureValidBatchTime(
-    startTime,
-    endTime
+  const { start, end, endDate: normalizedEndDate } = ensureValidBatchTime(
+    startTime, endTime, normalizedDate, endDate
   );
 
   const normalizedCapacity =
@@ -3137,6 +3287,9 @@ export async function createOfficeBatch({
       schedule_date:
         normalizedDate,
 
+      end_date:
+        normalizedEndDate,
+
       start_time:
         start,
 
@@ -3165,6 +3318,7 @@ export async function createOfficeBatch({
       created_by,
       batch_name,
       schedule_date,
+      end_date,
       start_time,
       end_time,
       note,
@@ -3192,6 +3346,7 @@ export async function updateOfficeBatch({
   batchId,
   batchName,
   scheduleDate,
+  endDate = null,
   startTime,
   endTime,
   note = "",
@@ -3230,12 +3385,8 @@ export async function updateOfficeBatch({
     );
   }
 
-  const {
-    start,
-    end,
-  } = ensureValidBatchTime(
-    startTime,
-    endTime
+  const { start, end, endDate: normalizedEndDate } = ensureValidBatchTime(
+    startTime, endTime, normalizedDate, endDate
   );
 
   const normalizedCapacity =
@@ -3304,6 +3455,9 @@ export async function updateOfficeBatch({
       schedule_date:
         normalizedDate,
 
+      end_date:
+        normalizedEndDate,
+
       start_time:
         start,
 
@@ -3337,6 +3491,7 @@ export async function updateOfficeBatch({
       created_by,
       batch_name,
       schedule_date,
+      end_date,
       start_time,
       end_time,
       note,
@@ -4576,4 +4731,240 @@ export async function removeStudentFromOfficeBatch({
     batchId,
     stepId,
   });
+}
+/*
+=========================================================
+EXPIRED BATCH RECONCILIATION
+- Move only unreviewed steps.
+- Keep submissions, responses and clearance steps untouched.
+- Never exceed a destination batch's capacity.
+- Report students who still need a new batch.
+=========================================================
+*/
+function officeBatchLocalNow() {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Manila",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date()).replace(" ", "T");
+}
+
+function officeBatchStart(batch) {
+  return `${batch.schedule_date}T${batch.start_time || "00:00:00"}`;
+}
+
+function officeBatchEnd(batch) {
+  return `${batch.end_date || batch.schedule_date}T${batch.end_time || "00:00:00"}`;
+}
+
+async function getExpiredOfficeBatchState(context) {
+  if (!context.officeIds.length) return { batches: [], assignments: [], steps: [] };
+
+  const { data: batches, error: batchError } = await supabase
+    .from("office_batches")
+    .select("id,office_id,batch_name,schedule_date,end_date,start_time,end_time,status,capacity")
+    .in("office_id", context.officeIds);
+  if (batchError) throw batchError;
+  if (!batches?.length) return { batches: [], assignments: [], steps: [] };
+
+  const { data: assignments, error: assignmentError } = await supabase
+    .from("office_batch_students")
+    .select("id,batch_id,clearance_step_id,student_id,assigned_at")
+    .in("batch_id", batches.map((batch) => batch.id));
+  if (assignmentError) throw assignmentError;
+  if (!assignments?.length) return { batches, assignments: [], steps: [] };
+
+  const { data: steps, error: stepError } = await supabase
+    .from("clearance_steps")
+    .select("id,office_id,status,reviewed_at")
+    .in("id", [...new Set(assignments.map((item) => item.clearance_step_id))]);
+  if (stepError) throw stepError;
+
+  return { batches, assignments, steps: steps || [] };
+}
+
+function findExpiredOfficeBatchStudents(state) {
+  const now = officeBatchLocalNow();
+  const batchMap = new Map(state.batches.map((batch) => [batch.id, batch]));
+  const stepMap = new Map(state.steps.map((step) => [step.id, step]));
+  const counts = new Map();
+  for (const assignment of state.assignments) {
+    counts.set(assignment.batch_id, (counts.get(assignment.batch_id) || 0) + 1);
+  }
+
+  const expired = state.assignments
+    .map((assignment) => {
+      const batch = batchMap.get(assignment.batch_id);
+      const step = stepMap.get(assignment.clearance_step_id);
+      if (!batch || !step || step.office_id !== batch.office_id) return null;
+      if (step.reviewed_at || ["approved", "rejected"].includes(String(step.status || "").toLowerCase())) return null;
+      if (officeBatchEnd(batch) >= now) return null;
+      return { assignment, batch, step };
+    })
+    .filter(Boolean)
+    .sort((a, b) => officeBatchEnd(a.batch).localeCompare(officeBatchEnd(b.batch)));
+
+  const planned = expired.map((item) => {
+    const candidates = state.batches
+      .filter((candidate) =>
+        candidate.office_id === item.batch.office_id &&
+        candidate.id !== item.batch.id &&
+        candidate.status === "Open" &&
+        officeBatchStart(candidate) > officeBatchStart(item.batch) &&
+        officeBatchEnd(candidate) > now &&
+        (counts.get(candidate.id) || 0) < Number(candidate.capacity || 0)
+      )
+      .sort((a, b) => officeBatchStart(a).localeCompare(officeBatchStart(b)));
+
+    const destination = candidates[0] || null;
+    if (destination) {
+      counts.set(destination.id, (counts.get(destination.id) || 0) + 1);
+      counts.set(item.batch.id, Math.max(0, (counts.get(item.batch.id) || 0) - 1));
+    }
+    return { ...item, destination };
+  });
+
+  return planned;
+}
+
+export async function getOfficeNewBatchNeeded() {
+  const context = await getOfficeStaffContext();
+  const state = await getExpiredOfficeBatchState(context);
+  const expired = findExpiredOfficeBatchStudents(state);
+  const waiting = expired.filter((item) => !item.destination).map((item) => ({
+    assignmentId: item.assignment.id,
+    clearanceStepId: item.step.id,
+    studentId: item.assignment.student_id,
+    officeId: item.batch.office_id,
+    expiredBatchId: item.batch.id,
+    expiredBatchName: item.batch.batch_name,
+    reason: "Missed batch deadline — no available next batch",
+  }));
+  const counts = new Map();
+  for (const item of waiting) counts.set(item.officeId, (counts.get(item.officeId) || 0) + 1);
+  return {
+    count: waiting.length,
+    byOffice: context.offices.map((office) => ({
+      officeId: office.id,
+      officeName: office.office_name,
+      count: counts.get(office.id) || 0,
+    })),
+    students: waiting,
+    transferableCount: expired.length - waiting.length,
+    expiredCount: expired.length,
+  };
+}
+
+/*
+Call this explicitly from the batch page. A failed move must not
+silently erase or rewrite the student's original assignment.
+*/
+export async function moveExpiredOfficeBatchStudents() {
+  const context = await getOfficeStaffContext();
+  const state = await getExpiredOfficeBatchState(context);
+  const planned = findExpiredOfficeBatchStudents(state);
+  const moved = [];
+  const errors = [];
+
+  for (const item of planned) {
+    if (!item.destination) continue;
+
+    // Recheck live capacity and step status before updating.
+    const { data: currentStep, error: stepError } = await supabase
+      .from("clearance_steps")
+      .select("id,status,reviewed_at")
+      .eq("id", item.step.id)
+      .single();
+    if (stepError) { errors.push(stepError.message); continue; }
+    if (!currentStep || currentStep.reviewed_at ||
+        ["approved", "rejected"].includes(String(currentStep.status || "").toLowerCase())) continue;
+
+    const { count, error: countError } = await supabase
+      .from("office_batch_students")
+      .select("id", { count: "exact", head: true })
+      .eq("batch_id", item.destination.id);
+    if (countError) { errors.push(countError.message); continue; }
+    if (Number(count || 0) >= Number(item.destination.capacity || 0)) continue;
+
+    const { data, error } = await supabase
+      .from("office_batch_students")
+      .update({ batch_id: item.destination.id })
+      .eq("id", item.assignment.id)
+      .eq("batch_id", item.batch.id)
+      .select("id,batch_id");
+    if (error) { errors.push(error.message); continue; }
+    if (data?.length) moved.push({
+      studentId: item.assignment.student_id,
+      fromBatchId: item.batch.id,
+      toBatchId: item.destination.id,
+    });
+  }
+
+  const remaining = await getOfficeNewBatchNeeded();
+  return { movedCount: moved.length, moved, errors, ...remaining };
+}
+
+/*
+=========================================================
+SAFE DELETE OFFICE BATCH
+=========================================================
+Only a Closed/Cancelled batch with zero remaining
+assignments can be deleted. The database RPC must repeat
+these checks atomically and verify office authorization.
+No student assignments or clearance history are deleted.
+=========================================================
+*/
+
+export async function deleteOfficeBatch(batchId) {
+  if (!batchId) {
+    throw new Error("Batch ID is required.");
+  }
+
+  const { batch } = await getAuthorizedOfficeBatch(batchId);
+
+  if (!["Closed", "Cancelled"].includes(batch.status)) {
+    throw new Error(
+      "Only Closed or Cancelled batches can be deleted."
+    );
+  }
+
+  const { count, error: countError } = await supabase
+    .from("office_batch_students")
+    .select("id", { count: "exact", head: true })
+    .eq("batch_id", batch.id);
+
+  if (countError) throw countError;
+
+  if (Number(count || 0) > 0) {
+    throw new Error(
+      "This batch still has student assignments. Move eligible students first; submitted or reviewed records must be preserved."
+    );
+  }
+
+  // The database function is responsible for authorization,
+  // locking and rechecking zero assignments before DELETE.
+  const { data, error } = await supabase.rpc(
+    "delete_empty_office_batch",
+    { p_batch_id: batch.id }
+  );
+
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      throw new Error(
+        "Safe batch deletion is not enabled in Supabase yet. Install the delete_empty_office_batch SQL function first."
+      );
+    }
+    throw error;
+  }
+
+  if (data !== true) {
+    throw new Error("Batch was not deleted. Please refresh and try again.");
+  }
+
+  return {
+    success: true,
+    deleted: true,
+    batchId: batch.id,
+  };
 }

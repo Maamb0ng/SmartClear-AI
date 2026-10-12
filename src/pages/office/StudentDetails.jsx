@@ -8,8 +8,6 @@ import {
 
 } from "react";
 
-
-
 import {
 
   useNavigate,
@@ -17,8 +15,6 @@ import {
   useParams,
 
 } from "react-router-dom";
-
-
 
 import {
 
@@ -56,15 +52,9 @@ import {
 
 } from "react-icons/fa";
 
-
-
 import Swal from "sweetalert2";
 
-
-
 import OfficeStaffLayout from "../../layouts/OfficeStaffLayout";
-
-
 
 import {
 
@@ -76,65 +66,45 @@ import {
 
 } from "../../services/officeStaffService";
 
-
-
 function StudentDetails() {
 
   const navigate = useNavigate();
 
-
-
   const { id } = useParams();
-
-
 
   const [loading, setLoading] =
 
     useState(true);
 
-
-
   const [saving, setSaving] =
 
     useState(false);
-
-
 
   const [error, setError] =
 
     useState("");
 
-
-
   const [office, setOffice] =
 
     useState(null);
-
-
 
   const [student, setStudent] =
 
     useState(null);
 
-
-
   const [step, setStep] =
 
     useState(null);
-
-
 
   const [request, setRequest] =
 
     useState(null);
 
-
-
   const [batch, setBatch] =
 
     useState(null);
 
-
+  const [studentSubmission, setStudentSubmission] = useState(null);
 
   const [
 
@@ -144,19 +114,13 @@ function StudentDetails() {
 
   ] = useState([]);
 
-
-
   const [remarks, setRemarks] =
 
     useState("");
 
-
-
   const [decision, setDecision] =
 
     useState(null);
-
-
 
   const [
 
@@ -165,8 +129,6 @@ function StudentDetails() {
     setShowConfirmation,
 
   ] = useState(false);
-
-
 
   /*
 
@@ -177,8 +139,6 @@ function StudentDetails() {
   =====================================
 
   */
-
-
 
   const loadStudentReview =
 
@@ -192,25 +152,17 @@ function StudentDetails() {
 
         );
 
-
-
         setLoading(false);
-
-
 
         return;
 
       }
-
-
 
       try {
 
         setLoading(true);
 
         setError("");
-
-
 
         const data =
 
@@ -220,15 +172,11 @@ function StudentDetails() {
 
           );
 
-
-
         setOffice(
 
           data.office || null
 
         );
-
-
 
         setStudent(
 
@@ -236,15 +184,11 @@ function StudentDetails() {
 
         );
 
-
-
         setStep(
 
           data.step || null
 
         );
-
-
 
         setRequest(
 
@@ -252,15 +196,13 @@ function StudentDetails() {
 
         );
 
-
-
         setBatch(
 
           data.batch || null
 
         );
 
-
+        setStudentSubmission(data.studentSubmission || data.submission || null);
 
         const mappedRequirements = (
 
@@ -276,8 +218,6 @@ function StudentDetails() {
 
               "check";
 
-
-
             const savedValue =
 
               String(
@@ -288,15 +228,11 @@ function StudentDetails() {
 
               ).trim();
 
-
-
             return {
 
               id:
 
                 requirement.id,
-
-
 
               type:
 
@@ -304,15 +240,11 @@ function StudentDetails() {
 
                 "Requirement",
 
-
-
               title:
 
                 requirement.title ||
 
                 "Requirement",
-
-
 
               description:
 
@@ -320,19 +252,13 @@ function StudentDetails() {
 
                 "",
 
-
-
               responseType,
-
-
 
               isRequired:
 
                 requirement.is_required ===
 
                 true,
-
-
 
               checked:
 
@@ -344,8 +270,6 @@ function StudentDetails() {
 
                   "verified",
 
-
-
               answer:
 
                 responseType ===
@@ -356,7 +280,9 @@ function StudentDetails() {
 
                   : "",
 
+              studentAnswer:
 
+                requirement.studentAnswer ?? null,
 
               responseValue:
 
@@ -368,15 +294,11 @@ function StudentDetails() {
 
         );
 
-
-
         setRequirements(
 
           mappedRequirements
 
         );
-
-
 
         setRemarks(
 
@@ -394,8 +316,6 @@ function StudentDetails() {
 
         );
 
-
-
         setError(
 
           err?.message ||
@@ -412,15 +332,11 @@ function StudentDetails() {
 
     };
 
-
-
   useEffect(() => {
 
     loadStudentReview();
 
   }, [id]);
-
-
 
   /*
 
@@ -431,8 +347,6 @@ function StudentDetails() {
   =====================================
 
   */
-
-
 
   const toggleRequirement = (
 
@@ -460,13 +374,9 @@ function StudentDetails() {
 
             }
 
-
-
             return {
 
               ...requirement,
-
-
 
               checked:
 
@@ -481,8 +391,6 @@ function StudentDetails() {
     );
 
   };
-
-
 
   const setQuestionAnswer = (
 
@@ -520,8 +428,6 @@ function StudentDetails() {
 
   };
 
-
-
   /*
 
   =====================================
@@ -531,8 +437,6 @@ function StudentDetails() {
   =====================================
 
   */
-
-
 
   const reviewSummary =
 
@@ -550,8 +454,6 @@ function StudentDetails() {
 
         );
 
-
-
       const questions =
 
         requirements.filter(
@@ -564,8 +466,6 @@ function StudentDetails() {
 
         );
 
-
-
       const completedChecks =
 
         checkRequirements.filter(
@@ -575,8 +475,6 @@ function StudentDetails() {
             item.checked
 
         ).length;
-
-
 
       const answeredQuestions =
 
@@ -592,8 +490,6 @@ function StudentDetails() {
 
         ).length;
 
-
-
       const requiredItems =
 
         requirements.filter(
@@ -603,8 +499,6 @@ function StudentDetails() {
             item.isRequired
 
         );
-
-
 
       const completedRequired =
 
@@ -623,8 +517,6 @@ function StudentDetails() {
               return item.checked;
 
             }
-
-
 
             if (
 
@@ -646,15 +538,11 @@ function StudentDetails() {
 
             }
 
-
-
             return false;
 
           }
 
         ).length;
-
-
 
       return {
 
@@ -662,35 +550,23 @@ function StudentDetails() {
 
           checkRequirements.length,
 
-
-
         completedChecks,
-
-
 
         questions:
 
           questions.length,
 
-
-
         answeredQuestions,
-
-
 
         required:
 
           requiredItems.length,
-
-
 
         completedRequired,
 
       };
 
     }, [requirements]);
-
-
 
   /*
 
@@ -702,8 +578,6 @@ function StudentDetails() {
 
   */
 
-
-
   const buildResponses = () => {
 
     return requirements.map(
@@ -711,8 +585,6 @@ function StudentDetails() {
       (requirement) => {
 
         let responseValue = "";
-
-
 
         if (
 
@@ -732,8 +604,6 @@ function StudentDetails() {
 
         }
 
-
-
         if (
 
           requirement.responseType ===
@@ -748,15 +618,11 @@ function StudentDetails() {
 
         }
 
-
-
         return {
 
           requirementId:
 
             requirement.id,
-
-
 
           responseValue,
 
@@ -768,8 +634,6 @@ function StudentDetails() {
 
   };
 
-
-
   /*
 
   =====================================
@@ -779,8 +643,6 @@ function StudentDetails() {
   =====================================
 
   */
-
-
 
   const validateApproval = () => {
 
@@ -800,8 +662,6 @@ function StudentDetails() {
 
           }
 
-
-
           if (
 
             requirement.responseType ===
@@ -813,8 +673,6 @@ function StudentDetails() {
             return !requirement.checked;
 
           }
-
-
 
           if (
 
@@ -832,15 +690,11 @@ function StudentDetails() {
 
           }
 
-
-
           return true;
 
         }
 
       );
-
-
 
     if (
 
@@ -852,37 +706,25 @@ function StudentDetails() {
 
         icon: "warning",
 
-
-
         title:
 
           "Incomplete Requirements",
-
-
 
         text:
 
           "Please complete all required office requirements before approving this student.",
 
-
-
         confirmButtonText: "Okay",
 
       });
-
-
 
       return false;
 
     }
 
-
-
     return true;
 
   };
-
-
 
   /*
 
@@ -893,8 +735,6 @@ function StudentDetails() {
   =====================================
 
   */
-
-
 
   const requestDecision = (
 
@@ -916,8 +756,6 @@ function StudentDetails() {
 
     }
 
-
-
     if (
 
       nextDecision ===
@@ -932,39 +770,27 @@ function StudentDetails() {
 
         icon: "warning",
 
-
-
         title:
 
           "Remarks Required",
-
-
 
         text:
 
           "Please add a remark explaining what the student needs to resolve.",
 
-
-
         confirmButtonText: "Okay",
 
       });
 
-
-
       return;
 
     }
-
-
 
     setDecision(
 
       nextDecision
 
     );
-
-
 
     setShowConfirmation(
 
@@ -973,8 +799,6 @@ function StudentDetails() {
     );
 
   };
-
-
 
   /*
 
@@ -985,8 +809,6 @@ function StudentDetails() {
   =====================================
 
   */
-
-
 
   const confirmDecision =
 
@@ -1004,13 +826,9 @@ function StudentDetails() {
 
       }
 
-
-
       try {
 
         setSaving(true);
-
-
 
         await saveOfficeStudentReview({
 
@@ -1018,19 +836,13 @@ function StudentDetails() {
 
             step.id,
 
-
-
           status:
 
             decision,
 
-
-
           remarks:
 
             remarks.trim(),
-
-
 
           responses:
 
@@ -1038,21 +850,15 @@ function StudentDetails() {
 
         });
 
-
-
         setShowConfirmation(
 
           false
 
         );
 
-
-
         await Swal.fire({
 
           icon: "success",
-
-
 
           title:
 
@@ -1064,8 +870,6 @@ function StudentDetails() {
 
               : "Needs Action",
 
-
-
           text:
 
             decision ===
@@ -1076,15 +880,11 @@ function StudentDetails() {
 
               : `${student?.name || "Student"} has been marked as Needs Action.`,
 
-
-
           confirmButtonText:
 
             "Continue",
 
         });
-
-
 
         navigate(
 
@@ -1102,27 +902,19 @@ function StudentDetails() {
 
         );
 
-
-
         await Swal.fire({
 
           icon: "error",
 
-
-
           title:
 
             "Unable to Save",
-
-
 
           text:
 
             err?.message ||
 
             "The clearance decision could not be saved.",
-
-
 
           confirmButtonText:
 
@@ -1138,8 +930,6 @@ function StudentDetails() {
 
     };
 
-
-
   /*
 
   =====================================
@@ -1149,8 +939,6 @@ function StudentDetails() {
   =====================================
 
   */
-
-
 
   const saveDraft =
 
@@ -1162,13 +950,9 @@ function StudentDetails() {
 
       }
 
-
-
       try {
 
         setSaving(true);
-
-
 
         await saveOfficeRequirementResponses({
 
@@ -1176,37 +960,25 @@ function StudentDetails() {
 
             step.id,
 
-
-
           responses:
 
             buildResponses(),
 
         });
 
-
-
         await Swal.fire({
 
           icon: "success",
-
-
 
           title:
 
             "Draft Saved",
 
-
-
           text:
 
             "Your office review progress has been saved.",
 
-
-
           timer: 1700,
-
-
 
           showConfirmButton:
 
@@ -1224,27 +996,19 @@ function StudentDetails() {
 
         );
 
-
-
         await Swal.fire({
 
           icon: "error",
 
-
-
           title:
 
             "Unable to Save Draft",
-
-
 
           text:
 
             err?.message ||
 
             "The review draft could not be saved.",
-
-
 
           confirmButtonText:
 
@@ -1260,8 +1024,6 @@ function StudentDetails() {
 
     };
 
-
-
   /*
 
   =====================================
@@ -1271,8 +1033,6 @@ function StudentDetails() {
   =====================================
 
   */
-
-
 
   if (loading) {
 
@@ -1286,15 +1046,11 @@ function StudentDetails() {
 
             <FaSpinner className="mx-auto animate-spin text-3xl text-blue-600 dark:text-blue-400" />
 
-
-
             <p className="mt-4 text-sm font-black text-slate-800 dark:text-slate-200">
 
               Loading Student Review
 
             </p>
-
-
 
             <p className="mt-1 text-xs font-medium text-slate-500">
 
@@ -1314,8 +1070,6 @@ function StudentDetails() {
 
   }
 
-
-
   /*
 
   =====================================
@@ -1325,8 +1079,6 @@ function StudentDetails() {
   =====================================
 
   */
-
-
 
   if (
 
@@ -1366,27 +1118,19 @@ function StudentDetails() {
 
             <FaArrowLeft />
 
-
-
             Back to Student Queue
 
           </button>
 
-
-
           <div className="rounded-3xl border border-red-200 bg-white p-8 text-center shadow-sm dark:border-red-500/20 dark:bg-slate-900">
 
             <FaExclamationTriangle className="mx-auto text-3xl text-red-500" />
-
-
 
             <h1 className="mt-4 text-xl font-black text-slate-950 dark:text-white">
 
               Unable to Load Review
 
             </h1>
-
-
 
             <p className="mx-auto mt-2 max-w-lg text-sm font-medium leading-6 text-slate-500 dark:text-slate-400">
 
@@ -1395,8 +1139,6 @@ function StudentDetails() {
                 "The requested clearance step could not be loaded."}
 
             </p>
-
-
 
             <div className="mt-5 flex flex-wrap justify-center gap-2">
 
@@ -1416,13 +1158,9 @@ function StudentDetails() {
 
                 <FaRedo />
 
-
-
                 Try Again
 
               </button>
-
-
 
               <button
 
@@ -1444,8 +1182,6 @@ function StudentDetails() {
 
                 <FaArrowLeft />
 
-
-
                 Student Queue
 
               </button>
@@ -1462,23 +1198,17 @@ function StudentDetails() {
 
   }
 
-
-
   const officeName =
 
     office.office_name ||
 
     "Office";
 
-
-
   const officeCode =
 
     office.office_code ||
 
     "OFFICE";
-
-
 
   const clearanceStatus =
 
@@ -1488,8 +1218,6 @@ function StudentDetails() {
 
     "Pending";
 
-
-
   return (
 
     <OfficeStaffLayout>
@@ -1497,8 +1225,6 @@ function StudentDetails() {
       <div className="mx-auto w-full max-w-[1450px] space-y-6">
 
         {/* HEADER */}
-
-
 
         <section>
 
@@ -1522,21 +1248,15 @@ function StudentDetails() {
 
             <FaArrowLeft />
 
-
-
             Back to Student Queue
 
           </button>
-
-
 
           <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
 
             <div className="relative p-5 sm:p-6 lg:p-7">
 
               <div className="absolute -right-20 -top-24 h-60 w-60 rounded-full bg-blue-100/70 blur-3xl dark:bg-blue-500/10" />
-
-
 
               <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
 
@@ -1552,8 +1272,6 @@ function StudentDetails() {
 
                   </div>
 
-
-
                   <div className="min-w-0">
 
                     <div className="flex flex-wrap items-center gap-2">
@@ -1563,8 +1281,6 @@ function StudentDetails() {
                         {officeCode}
 
                       </span>
-
-
 
                       <StatusBadge
 
@@ -1578,15 +1294,11 @@ function StudentDetails() {
 
                     </div>
 
-
-
                     <h1 className="mt-2 truncate text-2xl font-black tracking-tight text-slate-950 dark:text-white sm:text-3xl">
 
                       {student.name}
 
                     </h1>
-
-
 
                     <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
 
@@ -1606,8 +1318,6 @@ function StudentDetails() {
 
                 </div>
 
-
-
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/60">
 
                   <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
@@ -1616,13 +1326,9 @@ function StudentDetails() {
 
                   </p>
 
-
-
                   <p className="mt-1 flex items-center gap-2 text-sm font-black text-slate-900 dark:text-white">
 
                     <FaBuilding className="text-blue-500" />
-
-
 
                     {officeName}
 
@@ -1638,11 +1344,7 @@ function StudentDetails() {
 
         </section>
 
-
-
         {/* CONTENT */}
-
-
 
         <section className="grid gap-6 xl:grid-cols-[1fr_360px]">
 
@@ -1650,17 +1352,13 @@ function StudentDetails() {
 
             {/* STUDENT INFORMATION */}
 
-
-
-            <div className="rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
 
               <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
 
                 <div className="flex items-center gap-2">
 
                   <FaUserGraduate className="text-blue-600 dark:text-blue-400" />
-
-
 
                   <h2 className="text-base font-black text-slate-950 dark:text-white">
 
@@ -1671,8 +1369,6 @@ function StudentDetails() {
                 </div>
 
               </div>
-
-
 
               <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
 
@@ -1690,8 +1386,6 @@ function StudentDetails() {
 
                 />
 
-
-
                 <InfoItem
 
                   icon={FaUserGraduate}
@@ -1706,8 +1400,6 @@ function StudentDetails() {
 
                 />
 
-
-
                 <InfoItem
 
                   icon={FaUserGraduate}
@@ -1717,8 +1409,6 @@ function StudentDetails() {
                   value={`${student.yearLevel} • ${student.section}`}
 
                 />
-
-
 
                 <InfoItem
 
@@ -1736,8 +1426,6 @@ function StudentDetails() {
 
                 />
 
-
-
                 <InfoItem
 
                   icon={FaCalendarAlt}
@@ -1753,8 +1441,6 @@ function StudentDetails() {
                   }
 
                 />
-
-
 
                 <InfoItem
 
@@ -1774,21 +1460,15 @@ function StudentDetails() {
 
             </div>
 
-
-
             {/* REQUEST INFORMATION */}
 
-
-
-            <div className="rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
 
               <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
 
                 <div className="flex items-center gap-2">
 
                   <FaCalendarAlt className="text-blue-600 dark:text-blue-400" />
-
-
 
                   <h2 className="text-base font-black text-slate-950 dark:text-white">
 
@@ -1799,8 +1479,6 @@ function StudentDetails() {
                 </div>
 
               </div>
-
-
 
               <div className="p-5">
 
@@ -1814,8 +1492,6 @@ function StudentDetails() {
 
                     </p>
 
-
-
                     <p className="mt-1 text-sm font-black text-slate-900 dark:text-white">
 
                       {request?.status ||
@@ -1826,8 +1502,6 @@ function StudentDetails() {
 
                   </div>
 
-
-
                   <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/60">
 
                     <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
@@ -1835,8 +1509,6 @@ function StudentDetails() {
                       Requested
 
                     </p>
-
-
 
                     <p className="mt-1 text-sm font-black text-slate-900 dark:text-white">
 
@@ -1851,8 +1523,6 @@ function StudentDetails() {
                   </div>
 
                 </div>
-
-
 
                 {batch ? (
 
@@ -1972,13 +1642,125 @@ function StudentDetails() {
 
             </div>
 
+            {/* STUDENT SUBMISSION — read-only evidence for the current office step */}
 
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+
+                <div>
+
+                  <h2 className="flex items-center gap-2 text-base font-bold text-slate-900 dark:text-white">
+
+                    <FaClipboardCheck className="text-blue-600" /> Student Submission
+
+                  </h2>
+
+                  <p className="mt-1 text-xs text-slate-500">Evidence submitted to {officeName} for this clearance step.</p>
+
+                </div>
+
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${studentSubmission ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"}`}>
+
+                  {studentSubmission ? "Submitted" : "Not submitted"}
+
+                </span>
+
+              </div>
+
+              <div className="space-y-4 p-5">
+
+                {studentSubmission ? (
+
+                  <>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+
+                      <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+
+                        <p className="text-xs font-semibold text-slate-500">Submitted on</p>
+
+                        <p className="mt-1 text-sm font-medium text-slate-900 dark:text-white">{formatDateTime(studentSubmission.submitted_at)}</p>
+
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+
+                        <p className="text-xs font-semibold text-slate-500">Submission version</p>
+
+                        <p className="mt-1 text-sm font-medium text-slate-900 dark:text-white">Version {studentSubmission.version || 1}</p>
+
+                      </div>
+
+                    </div>
+
+                    {studentSubmission.submission_text && (
+
+                      <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
+
+                        <p className="text-xs font-semibold text-slate-500">Student's response</p>
+
+                        <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-800 dark:text-slate-200">{studentSubmission.submission_text}</p>
+
+                      </div>
+
+                    )}
+
+                    {studentSubmission.attachment_url ? (
+
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/50 p-4 dark:border-blue-500/20 dark:bg-blue-500/5">
+
+                        <div className="min-w-0">
+
+                          <p className="text-xs font-semibold text-slate-500">Uploaded attachment</p>
+
+                          <p className="mt-1 break-all text-sm font-semibold text-slate-900 dark:text-white">{studentSubmission.attachment_name || "Student attachment"}</p>
+
+                        </div>
+
+                        {studentSubmission.signed_url ? (
+
+                          <a href={studentSubmission.signed_url} target="\_blank" rel="noopener noreferrer" className="inline-flex shrink-0 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">View Attachment</a>
+
+                        ) : (
+
+                          <span className="text-xs text-amber-700 dark:text-amber-300">Attachment link unavailable. Check storage access.</span>
+
+                        )}
+
+                      </div>
+
+                    ) : (
+
+                      <p className="text-xs text-slate-500">No file was attached to this submission.</p>
+
+                    )}
+
+                    {requirements.length > 1 && (
+
+                      <p className="text-xs leading-5 text-slate-500">This submission belongs to the office clearance step as a whole. Individual requirements are reviewed in the checklist below.</p>
+
+                    )}
+
+                  </>
+
+                ) : (
+
+                  <div className="rounded-xl border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500 dark:border-slate-700">
+
+                    The student has not submitted an online response for this office step yet.
+
+                  </div>
+
+                )}
+
+              </div>
+
+            </div>
 
             {/* REQUIREMENTS */}
 
-
-
-            <div className="rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
 
               <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
 
@@ -1987,8 +1769,6 @@ function StudentDetails() {
                   <div className="flex items-center gap-2">
 
                     <FaClipboardList className="text-violet-600 dark:text-violet-400" />
-
-
 
                     <h2 className="text-base font-black text-slate-950 dark:text-white">
 
@@ -1999,8 +1779,6 @@ function StudentDetails() {
                     </h2>
 
                   </div>
-
-
 
                   <p className="mt-1 text-xs font-medium text-slate-500">
 
@@ -2013,8 +1791,6 @@ function StudentDetails() {
                   </p>
 
                 </div>
-
-
 
                 <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-slate-500 dark:bg-slate-800 dark:text-slate-400">
 
@@ -2030,8 +1806,6 @@ function StudentDetails() {
 
               </div>
 
-
-
               <div className="space-y-4 p-5">
 
                 {requirements.length ===
@@ -2042,8 +1816,6 @@ function StudentDetails() {
 
                     <FaClipboardCheck className="mx-auto mb-3 text-2xl text-slate-300" />
 
-
-
                     <p className="text-sm font-black text-slate-700 dark:text-slate-300">
 
                       No Office
@@ -2051,8 +1823,6 @@ function StudentDetails() {
                       Requirements
 
                     </p>
-
-
 
                     <p className="mt-1 text-xs font-medium text-slate-500">
 
@@ -2146,13 +1916,9 @@ function StudentDetails() {
 
             </div>
 
-
-
             {/* REMARKS */}
 
-
-
-            <div className="rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
 
               <div className="border-b border-slate-100 px-5 py-4 dark:border-slate-800">
 
@@ -2161,8 +1927,6 @@ function StudentDetails() {
                   Office Remarks
 
                 </h2>
-
-
 
                 <p className="mt-1 text-xs font-medium text-slate-500">
 
@@ -2177,8 +1941,6 @@ function StudentDetails() {
                 </p>
 
               </div>
-
-
 
               <div className="p-5">
 
@@ -2206,8 +1968,6 @@ function StudentDetails() {
 
                 />
 
-
-
                 <p className="mt-2 text-xs font-medium text-slate-400">
 
                   Remarks are required
@@ -2224,11 +1984,7 @@ function StudentDetails() {
 
           </div>
 
-
-
           {/* RIGHT PANEL */}
-
-
 
           <aside className="space-y-5 xl:sticky xl:top-20 xl:self-start">
 
@@ -2238,8 +1994,6 @@ function StudentDetails() {
 
                 <FaClipboardCheck className="text-blue-600 dark:text-blue-400" />
 
-
-
                 <h2 className="text-base font-black text-slate-950 dark:text-white">
 
                   Review Summary
@@ -2247,8 +2001,6 @@ function StudentDetails() {
                 </h2>
 
               </div>
-
-
 
               <div className="mt-5 space-y-3">
 
@@ -2260,8 +2012,6 @@ function StudentDetails() {
 
                 />
 
-
-
                 <SummaryRow
 
                   label="Questions answered"
@@ -2270,8 +2020,6 @@ function StudentDetails() {
 
                 />
 
-
-
                 <SummaryRow
 
                   label="Required completed"
@@ -2279,8 +2027,6 @@ function StudentDetails() {
                   value={`${reviewSummary.completedRequired}/${reviewSummary.required}`}
 
                 />
-
-
 
                 <SummaryRow
 
@@ -2292,15 +2038,11 @@ function StudentDetails() {
 
               </div>
 
-
-
               <div className="mt-5 rounded-2xl bg-blue-50 p-4 dark:bg-blue-500/5">
 
                 <div className="flex items-start gap-2">
 
                   <FaInfoCircle className="mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
-
-
 
                   <p className="text-xs font-medium leading-5 text-blue-700 dark:text-blue-300">
 
@@ -2328,8 +2070,6 @@ function StudentDetails() {
 
               </div>
 
-
-
               {step.rawStatus ===
 
                 "Rejected" && (
@@ -2339,8 +2079,6 @@ function StudentDetails() {
                   <div className="flex items-start gap-2">
 
                     <FaExclamationTriangle className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
-
-
 
                     <p className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300">
 
@@ -2368,11 +2106,7 @@ function StudentDetails() {
 
             </div>
 
-
-
             {/* ACTIONS */}
-
-
 
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
 
@@ -2381,8 +2115,6 @@ function StudentDetails() {
                 Clearance Decision
 
               </h2>
-
-
 
               <p className="mt-1 text-xs font-medium leading-5 text-slate-500">
 
@@ -2393,8 +2125,6 @@ function StudentDetails() {
                 before signing.
 
               </p>
-
-
 
               <div className="mt-5 space-y-2.5">
 
@@ -2428,13 +2158,9 @@ function StudentDetails() {
 
                   )}
 
-
-
                   Sign & Approve
 
                 </button>
-
-
 
                 <button
 
@@ -2458,13 +2184,9 @@ function StudentDetails() {
 
                   <FaExclamationTriangle />
 
-
-
                   Needs Action
 
                 </button>
-
-
 
                 <button
 
@@ -2488,8 +2210,6 @@ function StudentDetails() {
 
                   )}
 
-
-
                   Save Review Draft
 
                 </button>
@@ -2502,11 +2222,7 @@ function StudentDetails() {
 
         </section>
 
-
-
         {/* CONFIRMATION MODAL */}
-
-
 
         {showConfirmation && (
 
@@ -2533,8 +2249,6 @@ function StudentDetails() {
               className="absolute inset-0"
 
             />
-
-
 
             <div className="relative z-10 w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
 
@@ -2568,8 +2282,6 @@ function StudentDetails() {
 
               </div>
 
-
-
               <h2 className="mt-4 text-xl font-black text-slate-950 dark:text-white">
 
                 {decision ===
@@ -2581,8 +2293,6 @@ function StudentDetails() {
                   : "Mark as Needs Action?"}
 
               </h2>
-
-
 
               <p className="mt-2 text-sm font-medium leading-6 text-slate-500 dark:text-slate-400">
 
@@ -2596,8 +2306,6 @@ function StudentDetails() {
 
               </p>
 
-
-
               {remarks.trim() && (
 
                 <div className="mt-4 rounded-2xl bg-slate-50 p-3 dark:bg-slate-800">
@@ -2608,8 +2316,6 @@ function StudentDetails() {
 
                   </p>
 
-
-
                   <p className="mt-1 text-sm font-medium text-slate-700 dark:text-slate-300">
 
                     {remarks}
@@ -2619,8 +2325,6 @@ function StudentDetails() {
                 </div>
 
               )}
-
-
 
               <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
 
@@ -2646,13 +2350,9 @@ function StudentDetails() {
 
                   <FaTimes />
 
-
-
                   Cancel
 
                 </button>
-
-
 
                 <button
 
@@ -2690,8 +2390,6 @@ function StudentDetails() {
 
                   )}
 
-
-
                   {saving
 
                     ? "Saving..."
@@ -2716,19 +2414,15 @@ function StudentDetails() {
 
 }
 
-
-
 /*
 
-=====================================
+\=====================================
 
 REQUIREMENT CARD
 
-=====================================
+\=====================================
 
 */
-
-
 
 function RequirementCard({
 
@@ -2749,8 +2443,6 @@ function RequirementCard({
     requirement.responseType ===
 
     "yes-no";
-
-
 
   return (
 
@@ -2784,8 +2476,6 @@ function RequirementCard({
 
         </div>
 
-
-
         <div className="min-w-0 flex-1">
 
           <div className="flex flex-wrap items-center gap-2">
@@ -2797,8 +2487,6 @@ function RequirementCard({
               {number}
 
             </span>
-
-
 
             <span
 
@@ -2824,15 +2512,11 @@ function RequirementCard({
 
           </div>
 
-
-
           <h3 className="mt-1 text-sm font-black text-slate-900 dark:text-white">
 
             {requirement.title}
 
           </h3>
-
-
 
           {requirement.description && (
 
@@ -2848,7 +2532,17 @@ function RequirementCard({
 
           )}
 
-
+          {requirement.studentAnswer !== null &&
+            requirement.studentAnswer !== undefined && (
+              <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+                  Student's Submitted Answer
+                </p>
+                <p className="mt-1 whitespace-pre-wrap break-words text-sm font-medium text-slate-800 dark:text-slate-100">
+                  {String(requirement.studentAnswer).trim() || "(Blank answer)"}
+                </p>
+              </div>
+            )}
 
           {!isQuestion ? (
 
@@ -2894,8 +2588,6 @@ function RequirementCard({
 
               </span>
 
-
-
               {requirement.checked
 
                 ? "Verified"
@@ -2937,8 +2629,6 @@ function RequirementCard({
                 Yes
 
               </button>
-
-
 
               <button
 
@@ -2984,19 +2674,15 @@ function RequirementCard({
 
 }
 
-
-
 /*
 
-=====================================
+\=====================================
 
 INFO ITEM
 
-=====================================
+\=====================================
 
 */
-
-
 
 function InfoItem({
 
@@ -3018,8 +2704,6 @@ function InfoItem({
 
       </div>
 
-
-
       <div className="min-w-0">
 
         <p className="text-[9px] font-black uppercase tracking-[0.14em] text-slate-400">
@@ -3027,8 +2711,6 @@ function InfoItem({
           {label}
 
         </p>
-
-
 
         <p className="mt-1 truncate text-xs font-bold text-slate-800 dark:text-slate-200">
 
@@ -3044,19 +2726,15 @@ function InfoItem({
 
 }
 
-
-
 /*
 
-=====================================
+\=====================================
 
 SUMMARY ROW
 
-=====================================
+\=====================================
 
 */
-
-
 
 function SummaryRow({
 
@@ -3076,8 +2754,6 @@ function SummaryRow({
 
       </span>
 
-
-
       <span className="text-xs font-black text-slate-900 dark:text-white">
 
         {value}
@@ -3090,19 +2766,15 @@ function SummaryRow({
 
 }
 
-
-
 /*
 
-=====================================
+\=====================================
 
 STATUS BADGE
 
-=====================================
+\=====================================
 
 */
-
-
 
 function StatusBadge({
 
@@ -3118,13 +2790,9 @@ function StatusBadge({
 
     ).toLowerCase();
 
-
-
   let classes =
 
     "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
-
-
 
   if (
 
@@ -3137,8 +2805,6 @@ function StatusBadge({
       "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400";
 
   }
-
-
 
   if (
 
@@ -3154,8 +2820,6 @@ function StatusBadge({
 
   }
 
-
-
   if (
 
     normalized === "pending"
@@ -3167,8 +2831,6 @@ function StatusBadge({
       "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400";
 
   }
-
-
 
   return (
 
@@ -3186,19 +2848,15 @@ function StatusBadge({
 
 }
 
-
-
 /*
 
-=====================================
+\=====================================
 
 FORMAT DATE
 
-=====================================
+\=====================================
 
 */
-
-
 
 function formatDateTime(
 
@@ -3212,13 +2870,9 @@ function formatDateTime(
 
   }
 
-
-
   const date =
 
     new Date(value);
-
-
 
   if (
 
@@ -3233,8 +2887,6 @@ function formatDateTime(
     return "—";
 
   }
-
-
 
   return date.toLocaleString(
 
@@ -3258,15 +2910,13 @@ function formatDateTime(
 
 }
 
-
-
 /*
 
-=====================================
+\=====================================
 
 FORMAT SCHEDULE DATE / TIME
 
-=====================================
+\=====================================
 
 */
 
@@ -3344,15 +2994,13 @@ function formatScheduleTime(value) {
 
 /*
 
-=====================================
+\=====================================
 
 INITIALS
 
-=====================================
+\=====================================
 
 */
-
-
 
 function getInitials(name) {
 
@@ -3377,7 +3025,5 @@ function getInitials(name) {
     .toUpperCase();
 
 }
-
-
 
 export default StudentDetails;

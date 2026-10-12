@@ -37,6 +37,9 @@ import {
   getGuidanceEligibleStudents,
   getGuidanceBatchStudents,
   updateGuidanceBatch,
+  getGuidanceRescheduleRequests,
+  getGuidanceRescheduleStudentProfiles,
+  decideGuidanceReschedule,
 } from "../../services/guidanceService";
 
 // ============================================================
@@ -50,6 +53,7 @@ const INITIAL_FORM = {
   schedule_date: "",
   start_time: "",
   end_time: "",
+  deadline_date: "",
   question: "",
   instructions: "",
   max_students: 30,
@@ -194,7 +198,7 @@ const getBatchScheduleState = (batch) => {
   );
 
   const end = createScheduleDate(
-    batch.schedule_date,
+    batch.deadline_date || batch.schedule_date,
     batch.end_time
   );
 
@@ -292,6 +296,17 @@ function PendingStudents() {
   const [batches, setBatches] = useState([]);
 
   const [batchCounts, setBatchCounts] = useState({});
+  const [assignedBatch, setAssignedBatch] = useState(null);
+  const [assignedStudents, setAssignedStudents] = useState([]);
+  const [assignedSearch, setAssignedSearch] = useState("");
+  const [assignedLoading, setAssignedLoading] = useState(false);
+  const [guidanceRescheduleRequests, setGuidanceRescheduleRequests] = useState([]);
+  const [processingRescheduleId, setProcessingRescheduleId] = useState(null);
+  const [rescheduleStudentProfiles, setRescheduleStudentProfiles] = useState({});
+  const [rescheduleSearch, setRescheduleSearch] = useState("");
+  const [reschedulePage, setReschedulePage] = useState(1);
+  const [selectedRescheduleRequest, setSelectedRescheduleRequest] = useState(null);
+
 
   const [
     eligibleStudents,
@@ -447,6 +462,26 @@ function PendingStudents() {
   }, []);
 
   // =========================================================
+  // VIEW STUDENTS ALREADY ASSIGNED TO A BATCH
+  // =========================================================
+  const openAssignedStudents = async (batch) => {
+    setAssignedBatch(batch);
+    setAssignedStudents([]);
+    setAssignedSearch("");
+    setAssignedLoading(true);
+    try {
+      const result = await getGuidanceBatchStudents(batch.id);
+      if (!result.success) throw new Error(result.error || "Unable to load assigned students.");
+      setAssignedStudents(result.data || []);
+    } catch (error) {
+      setAssignedBatch(null);
+      await Swal.fire("Unable to Load Students", error?.message || "Please try again.", "error");
+    } finally {
+      setAssignedLoading(false);
+    }
+  };
+
+  // =========================================================
   // LOAD PAGE
   // =========================================================
 
@@ -475,6 +510,15 @@ function PendingStudents() {
           throw new Error(
             eligibleResult.error
           );
+        }
+
+        const rescheduleResult = await getGuidanceRescheduleRequests();
+        if (rescheduleResult.success) {
+          setGuidanceRescheduleRequests(rescheduleResult.data || []);
+          const profilesResult = await getGuidanceRescheduleStudentProfiles(rescheduleResult.data || []);
+          if (profilesResult.success) {
+            setRescheduleStudentProfiles(profilesResult.data || {});
+          }
         }
 
         const loadedBatches =
@@ -614,14 +658,15 @@ function PendingStudents() {
       event.preventDefault();
 
       if (
-        formData.end_time <=
-        formData.start_time
+        !formData.deadline_date ||
+        `${formData.deadline_date}T${formData.end_time}` <=
+          `${formData.schedule_date}T${formData.start_time}`
       ) {
         await Swal.fire({
           icon: "warning",
           title: "Invalid Schedule",
           text:
-            "The end time must be later than the start time.",
+            "The deadline must be later than the start date and time.",
           confirmButtonColor: "#2563eb",
         });
 
@@ -636,7 +681,7 @@ function PendingStudents() {
 
       const end =
         createScheduleDate(
-          formData.schedule_date,
+          formData.deadline_date,
           formData.end_time
         );
 
@@ -806,7 +851,7 @@ function PendingStudents() {
     async (batch, minutes) => {
       const currentEnd =
         createScheduleDate(
-          batch.schedule_date,
+          batch.deadline_date || batch.schedule_date,
           batch.end_time
         );
 
@@ -1287,6 +1332,63 @@ function PendingStudents() {
       });
     };
 
+  const handleRescheduleDecision = async (request, approve) => {
+    let selectedBatchId = null;
+    let remarks = "";
+    if (approve) {
+      const original = batches.find((batch) => batch.id === request.old_batch_id);
+      // Display every Open Guidance batch here. The secure database RPC
+      // validates office, academic period, capacity and deadline on approval.
+      // Do not silently hide batches because of missing frontend metadata.
+      const options = batches.filter((batch) =>
+        String(batch.status || "").trim().toLowerCase() === "open" &&
+        batch.id !== request.old_batch_id
+      );
+      if (!options.length) {
+        await Swal.fire("No Available Batch", "No Open Guidance batches were returned by the database. Refresh the schedule list.", "info");
+        return;
+      }
+      const choice = await Swal.fire({
+        title: "Assign to New Guidance Batch",
+        input: "select",
+        inputOptions: Object.fromEntries(options.map((batch) =>
+          [batch.id, `${batch.batch_name} — deadline ${batch.deadline_date || batch.schedule_date}`]
+        )),
+        inputPlaceholder: "Choose an Open batch",
+        showCancelButton: true,
+        confirmButtonText: "Approve & Assign",
+        inputValidator: (value) => !value ? "Select a batch" : undefined,
+      });
+      if (!choice.isConfirmed) return;
+      selectedBatchId = choice.value;
+    } else {
+      const choice = await Swal.fire({
+        title: "Reject Reschedule Request?",
+        input: "textarea",
+        inputPlaceholder: "Reason (optional)",
+        showCancelButton: true,
+        confirmButtonText: "Reject Request",
+        confirmButtonColor: "#dc2626",
+      });
+      if (!choice.isConfirmed) return;
+      remarks = choice.value || "";
+    }
+    setProcessingRescheduleId(request.id);
+    const result = await decideGuidanceReschedule({
+      requestId: request.id,
+      approve,
+      newBatchId: selectedBatchId,
+      remarks,
+    });
+    setProcessingRescheduleId(null);
+    if (!result.success) {
+      await Swal.fire("Unable to Process", result.error || "Please try again.", "error");
+      return;
+    }
+    await Swal.fire("Updated", result.message, "success");
+    await loadPage({ silent: true });
+  };
+
   // =========================================================
   // LOADING
   // =========================================================
@@ -1319,6 +1421,155 @@ function PendingStudents() {
   return (
     <GuidanceLayout>
       <div className="space-y-6">
+        {/* GUIDANCE RESCHEDULE REQUESTS - SEARCHABLE, PAGINATED */}
+        {guidanceRescheduleRequests.some((request) => request.status === "Pending") && (
+        <section className="rounded-2xl border border-amber-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-black text-slate-900">Guidance Reschedule Requests</h2>
+              <p className="text-xs text-slate-500">Manage students who missed their Guidance deadline.</p>
+            </div>
+            <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-bold text-amber-800">
+              {guidanceRescheduleRequests.filter((r) => r.status === "Pending").length} Pending
+            </span>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <div className="relative min-w-[210px] flex-1">
+              <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                value={rescheduleSearch}
+                onChange={(event) => { setRescheduleSearch(event.target.value); setReschedulePage(1); }}
+                placeholder="Search student name, ID or batch..."
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-blue-400"
+              />
+            </div>
+          </div>
+
+          {(() => {
+            const filtered = guidanceRescheduleRequests.filter((request) => {
+              if (request.status !== "Pending") return false;
+              const student = rescheduleStudentProfiles[request.student_id] || {};
+              const oldBatch = batches.find((batch) => batch.id === request.old_batch_id);
+              const searchText = [
+                student.full_name, student.student_id, request.student_id,
+                oldBatch?.batch_name, request.reason,
+              ].filter(Boolean).join(" ").toLowerCase();
+              return searchText.includes(rescheduleSearch.trim().toLowerCase());
+            });
+            const pageSize = 5;
+            const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+            const page = Math.min(reschedulePage, pageCount);
+            const visible = filtered.slice((page - 1) * pageSize, page * pageSize);
+            return (
+              <>
+                <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="min-w-[650px] w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">Student</th>
+                        <th className="px-4 py-3">Previous Batch</th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {visible.map((request) => {
+                        const student = rescheduleStudentProfiles[request.student_id] || {};
+                        const oldBatch = batches.find((batch) => batch.id === request.old_batch_id);
+                        return (
+                          <tr key={request.id} className="hover:bg-slate-50">
+                            <td className="px-4 py-3">
+                              <p className="font-bold text-slate-800">{student.full_name || "Student name unavailable"}</p>
+                              <p className="text-xs text-slate-500">{student.student_id || request.student_id}</p>
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">{oldBatch?.batch_name || "Guidance Batch"}</td>
+                            <td className="px-4 py-3">
+                              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                                "bg-amber-100 text-amber-800"
+                              }`}>{request.status}</span>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedRescheduleRequest(request)}
+                                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50"
+                              >
+                                Review
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {visible.length === 0 && (
+                        <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-500">No matching reschedule requests.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-slate-500">
+                    {filtered.length ? `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, filtered.length)} of ${filtered.length}` : "0 requests"}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button type="button" disabled={page <= 1}
+                      onClick={() => setReschedulePage(page - 1)}
+                      className="rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40">Previous</button>
+                    <span className="text-xs text-slate-600">{page} / {pageCount}</span>
+                    <button type="button" disabled={page >= pageCount}
+                      onClick={() => setReschedulePage(page + 1)}
+                      className="rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40">Next</button>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </section>
+        )}
+
+        {selectedRescheduleRequest && selectedRescheduleRequest.status === "Pending" && (() => {
+          const request = selectedRescheduleRequest;
+          const student = rescheduleStudentProfiles[request.student_id] || {};
+          const oldBatch = batches.find((batch) => batch.id === request.old_batch_id);
+          return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4"
+              onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedRescheduleRequest(null); }}>
+              <div role="dialog" aria-modal="true" aria-label="Review Guidance reschedule request"
+                className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900">Reschedule Request</h3>
+                    <p className="mt-1 text-sm text-slate-500">Review the missed-deadline request.</p>
+                  </div>
+                  <button type="button" aria-label="Close" onClick={() => setSelectedRescheduleRequest(null)}
+                    className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><FaTimes /></button>
+                </div>
+                <div className="mt-5 space-y-3 rounded-xl bg-slate-50 p-4 text-sm">
+                  <p><span className="font-semibold text-slate-500">Student:</span> {student.full_name || "Student name unavailable"}</p>
+                  <p><span className="font-semibold text-slate-500">Student ID:</span> {student.student_id || request.student_id}</p>
+                  <p><span className="font-semibold text-slate-500">Previous Batch:</span> {oldBatch?.batch_name || "Guidance Batch"}</p>
+                  <p><span className="font-semibold text-slate-500">Reason:</span> {request.reason || "No reason provided"}</p>
+                  <p><span className="font-semibold text-slate-500">Status:</span> {request.status}</p>
+                </div>
+                <div className="mt-5 flex flex-wrap justify-end gap-2">
+                  <button type="button" onClick={() => setSelectedRescheduleRequest(null)}
+                    className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold">Close</button>
+                  {request.status === "Pending" && (
+                    <>
+                      <button type="button" disabled={Boolean(processingRescheduleId)}
+                        onClick={async () => { await handleRescheduleDecision(request, false); setSelectedRescheduleRequest(null); }}
+                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Reject</button>
+                      <button type="button" disabled={Boolean(processingRescheduleId)}
+                        onClick={async () => { await handleRescheduleDecision(request, true); setSelectedRescheduleRequest(null); }}
+                        className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Approve & Assign</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         {/* HEADER */}
 
         <motion.div
@@ -1594,6 +1845,12 @@ function PendingStudents() {
                       </div>
                     )}
 
+                    {["Completed", "Closed", "ended"].includes(sessionState) && counts.scheduled > 0 && (
+                      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">
+                        {counts.scheduled} student(s) not submitted — missed Guidance deadline
+                      </div>
+                    )}
+
                     {/* BATCH PROGRESS */}
 
                     <div className="mt-4">
@@ -1661,6 +1918,15 @@ function PendingStudents() {
                     {/* ACTIONS */}
 
                     <div className="mt-5 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openAssignedStudents(batch)}
+                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        <FaUsers />
+                        View Assigned Students ({counts.assigned})
+                      </button>
+
                       {batch.status !==
                         "Completed" &&
                         batch.status !==
@@ -1785,6 +2051,70 @@ function PendingStudents() {
           </div>
         )}
       </div>
+
+      {/* ASSIGNED STUDENTS MODAL — read-only, includes rescheduled students */}
+      {assignedBatch && (
+        <ModalOverlay onClose={() => !assignedLoading && setAssignedBatch(null)}>
+          <div className="w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <ModalHeader
+              title="Assigned Students"
+              subtitle={`${assignedBatch.batch_name} • ${assignedStudents.length} student(s)`}
+              onClose={() => setAssignedBatch(null)}
+            />
+            <div className="max-h-[75vh] overflow-y-auto p-5 sm:p-6">
+              <div className="relative mb-4">
+                <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="search"
+                  value={assignedSearch}
+                  onChange={(event) => setAssignedSearch(event.target.value)}
+                  placeholder="Search assigned student name, ID or status..."
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-3 text-sm outline-none focus:border-blue-400"
+                />
+              </div>
+              {assignedLoading ? (
+                <p className="py-10 text-center text-sm text-slate-500">Loading assigned students...</p>
+              ) : (() => {
+                const matches = assignedStudents.filter((item) => {
+                  const student = item.student || item.students || {};
+                  const user = item.user || item.users || {};
+                  const text = [
+                    student.full_name, student.student_id, student.name,
+                    user.full_name, user.student_id,
+                    item.full_name, item.student_name, item.student_id,
+                    item.guidance_status,
+                  ].filter(Boolean).join(" ").toLowerCase();
+                  return text.includes(assignedSearch.trim().toLowerCase());
+                });
+                return matches.length ? (
+                  <div className="space-y-2">
+                    {matches.map((item) => {
+                      const student = item.student || item.students || {};
+                      const user = item.user || item.users || {};
+                      const name = student.full_name || student.name || user.full_name || item.full_name || item.student_name;
+                      const id = student.student_id || user.student_id || item.student_id;
+                      const status = item.guidance_status || "Scheduled";
+                      return (
+                        <div key={item.id || item.clearance_step_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4">
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-900">{name || "Student profile unavailable"}</p>
+                            <p className="mt-1 text-xs text-slate-500">{id || "No student ID"}</p>
+                          </div>
+                          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{status}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="py-10 text-center text-sm text-slate-500">
+                    {assignedStudents.length ? "No matching assigned students." : "No students assigned to this batch yet."}
+                  </p>
+                );
+              })()}
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
 
       {/* =====================================================
           CREATE BATCH MODAL
@@ -1929,7 +2259,7 @@ function PendingStudents() {
                 </Field>
 
                 <Field
-                  label="Schedule Date"
+                  label="Start Date"
                   required
                 >
                   <input
@@ -1978,7 +2308,25 @@ function PendingStudents() {
                   </Field>
 
                   <Field
-                    label="End"
+                    label="Deadline Date"
+                    required
+                  >
+                    <input
+                      required
+                      type="date"
+                      min={formData.schedule_date || undefined}
+                      value={formData.deadline_date}
+                      onChange={(event) =>
+                        setFormData((current) => ({
+                          ...current,
+                          deadline_date: event.target.value,
+                        }))
+                      }
+                      className={inputClass}
+                    />
+                  </Field>
+                  <Field
+                    label="Deadline Time"
                     required
                   >
                     <input

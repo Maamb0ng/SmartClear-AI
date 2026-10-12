@@ -4,11 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 import Swal from "sweetalert2";
 
-
-
 import TreasurerLayout from "../../layouts/TreasurerLayout";
-
-
 
 import {
 
@@ -23,14 +19,16 @@ import {
   updateTreasurerBatch,
 
   updateTreasurerBatchStatus,
+  addStudentsToTreasurerBatch,
+  getTreasurerRescheduleRequests,
+  reviewTreasurerReschedule,
 
 } from "../../services/treasurerService";
-
-
 
 import {
 
   FaCalendarAlt,
+  FaChevronDown,
 
   FaCheck,
 
@@ -56,8 +54,6 @@ import {
 
 } from "react-icons/fa";
 
-
-
 const INITIAL_FORM = {
 
   batchName: "",
@@ -78,25 +74,17 @@ const INITIAL_FORM = {
 
 };
 
-
-
 const formatDate = (value) => {
 
   if (!value) return "No date";
 
-
-
   const date = new Date(`${value}T00:00:00`);
-
-
 
   if (Number.isNaN(date.getTime())) {
 
     return value;
 
   }
-
-
 
   return date.toLocaleDateString("en-PH", {
 
@@ -110,21 +98,13 @@ const formatDate = (value) => {
 
 };
 
-
-
 const formatTime = (value) => {
 
   if (!value) return "";
 
-
-
   const raw = String(value).slice(0, 5);
 
-
-
   const [hour, minute] = raw.split(":");
-
-
 
   if (hour === undefined || minute === undefined) {
 
@@ -132,11 +112,7 @@ const formatTime = (value) => {
 
   }
 
-
-
   const date = new Date();
-
-
 
   date.setHours(
 
@@ -150,8 +126,6 @@ const formatTime = (value) => {
 
   );
 
-
-
   return date.toLocaleTimeString("en-PH", {
 
     hour: "numeric",
@@ -162,7 +136,18 @@ const formatTime = (value) => {
 
 };
 
-
+// Display-only schedule status. Keep the stored database status unchanged.
+// The scheduled visit ends at the batch end time in the school's local timezone.
+const getEffectiveBatchStatus = (batch) => {
+  const stored = String(batch?.status || "Draft");
+  if (stored !== "Open") return stored;
+  if (!batch?.schedule_date) return stored;
+  const endTime = String(batch.end_time || "23:59:59").slice(0, 8);
+  const end = new Date(`${batch.schedule_date}T${endTime}`);
+  return !Number.isNaN(end.getTime()) && end.getTime() < Date.now()
+    ? "Expired"
+    : stored;
+};
 
 const getStatusStyle = (status) => {
 
@@ -172,25 +157,20 @@ const getStatusStyle = (status) => {
 
       return "bg-emerald-50 text-emerald-700 ring-emerald-200";
 
-
+    case "Expired":
+      return "bg-rose-50 text-rose-700 ring-rose-200";
 
     case "Completed":
 
       return "bg-blue-50 text-blue-700 ring-blue-200";
 
-
-
     case "Closed":
 
       return "bg-slate-100 text-slate-700 ring-slate-200";
 
-
-
     case "Cancelled":
 
       return "bg-red-50 text-red-700 ring-red-200";
-
-
 
     default:
 
@@ -200,8 +180,6 @@ const getStatusStyle = (status) => {
 
 };
 
-
-
 function ScheduleBatches() {
 
   const [loading, setLoading] = useState(true);
@@ -210,76 +188,72 @@ function ScheduleBatches() {
 
     useState(false);
 
-
-
   const [eligibleStudents, setEligibleStudents] =
 
     useState([]);
 
-
-
   const [batches, setBatches] = useState([]);
-
-
+  const [rescheduleRequests, setRescheduleRequests] = useState([]);
+  const [showRescheduleRequests, setShowRescheduleRequests] = useState(false);
+  const [reviewingRequest, setReviewingRequest] = useState(null);
 
   const [showCreateModal, setShowCreateModal] =
 
     useState(false);
 
-
-
   const [saving, setSaving] = useState(false);
-
-
 
   const [searchTerm, setSearchTerm] =
 
     useState("");
 
-
-
   const [courseFilter, setCourseFilter] =
 
     useState("All");
-
-
 
   const [yearFilter, setYearFilter] =
 
     useState("All");
 
-
-
   const [selectedSteps, setSelectedSteps] =
 
     useState([]);
-
-
 
   const [form, setForm] =
 
     useState(INITIAL_FORM);
 
   const [manageBatch, setManageBatch] = useState(null);
+
   const [manageStudents, setManageStudents] = useState([]);
+
   const [savingManage, setSavingManage] = useState(false);
+  const [showAddStudents, setShowAddStudents] = useState(false);
+  const [addSearch, setAddSearch] = useState("");
+  const [addCourse, setAddCourse] = useState("All");
+  const [addYear, setAddYear] = useState("All");
+  const [addSelected, setAddSelected] = useState([]);
+  const [savingAdd, setSavingAdd] = useState(false);
+
   const [viewBatch, setViewBatch] = useState(null);
+
   const [viewStudents, setViewStudents] = useState([]);
+
   const [loadingView, setLoadingView] = useState(false);
+
   const [editForm, setEditForm] = useState({
+
     batchName: "", scheduleDate: "", startTime: "", endTime: "",
+
     studentNote: "", maxStudents: 30, status: "Open",
+
   });
-
-
 
   useEffect(() => {
 
     loadData();
 
   }, []);
-
-
 
   const loadData = async (
 
@@ -299,23 +273,21 @@ function ScheduleBatches() {
 
       }
 
-
-
       const [
 
         eligibleResult,
 
         batchResult,
+        requestResult,
 
       ] = await Promise.all([
 
         getTreasurerEligibleStudents(),
 
         getTreasurerBatches(),
+        getTreasurerRescheduleRequests(),
 
       ]);
-
-
 
       setEligibleStudents(
 
@@ -327,8 +299,7 @@ function ScheduleBatches() {
 
       );
 
-
-
+      setRescheduleRequests(Array.isArray(requestResult) ? requestResult : []);
       setBatches(
 
         Array.isArray(batchResult)
@@ -348,8 +319,6 @@ function ScheduleBatches() {
         error
 
       );
-
-
 
       await Swal.fire({
 
@@ -374,8 +343,6 @@ function ScheduleBatches() {
     }
 
   };
-
-
 
   const courseOptions = useMemo(() => {
 
@@ -406,8 +373,6 @@ function ScheduleBatches() {
     );
 
   }, [eligibleStudents]);
-
-
 
   const yearOptions = useMemo(() => {
 
@@ -443,8 +408,6 @@ function ScheduleBatches() {
 
   }, [eligibleStudents]);
 
-
-
   const filteredStudents = useMemo(() => {
 
     const query = searchTerm
@@ -452,8 +415,6 @@ function ScheduleBatches() {
       .trim()
 
       .toLowerCase();
-
-
 
     return eligibleStudents.filter(
 
@@ -473,8 +434,6 @@ function ScheduleBatches() {
 
         }
 
-
-
         if (
 
           yearFilter !== "All" &&
@@ -489,15 +448,11 @@ function ScheduleBatches() {
 
         }
 
-
-
         if (!query) {
 
           return true;
 
         }
-
-
 
         return [
 
@@ -541,13 +496,9 @@ function ScheduleBatches() {
 
   ]);
 
-
-
   const selectedCount =
 
     selectedSteps.length;
-
-
 
   const allVisibleSelected =
 
@@ -562,8 +513,6 @@ function ScheduleBatches() {
       )
 
     );
-
-
 
   const openCreateBatch = () => {
 
@@ -581,13 +530,9 @@ function ScheduleBatches() {
 
   };
 
-
-
   const closeCreateBatch = () => {
 
     if (saving) return;
-
-
 
     setShowCreateModal(false);
 
@@ -596,8 +541,6 @@ function ScheduleBatches() {
     setForm(INITIAL_FORM);
 
   };
-
-
 
   const toggleStudent = (stepId) => {
 
@@ -613,13 +556,9 @@ function ScheduleBatches() {
 
       }
 
-
-
       const maxStudents =
 
         Number(form.maxStudents) || 0;
-
-
 
       if (
 
@@ -639,21 +578,15 @@ function ScheduleBatches() {
 
         });
 
-
-
         return current;
 
       }
-
-
 
       return [...current, stepId];
 
     });
 
   };
-
-
 
   const toggleSelectVisible = () => {
 
@@ -669,8 +602,6 @@ function ScheduleBatches() {
 
         );
 
-
-
       setSelectedSteps((current) =>
 
         current.filter(
@@ -683,27 +614,19 @@ function ScheduleBatches() {
 
       );
 
-
-
       return;
 
     }
 
-
-
     const capacity =
 
       Number(form.maxStudents) || 0;
-
-
 
     const current = [
 
       ...selectedSteps,
 
     ];
-
-
 
     for (const student of filteredStudents) {
 
@@ -718,8 +641,6 @@ function ScheduleBatches() {
         break;
 
       }
-
-
 
       if (
 
@@ -741,13 +662,9 @@ function ScheduleBatches() {
 
     }
 
-
-
     setSelectedSteps(current);
 
   };
-
-
 
   const handleMaxStudentsChange = (
 
@@ -757,8 +674,6 @@ function ScheduleBatches() {
 
     const value = event.target.value;
 
-
-
     setForm((previous) => ({
 
       ...previous,
@@ -767,11 +682,7 @@ function ScheduleBatches() {
 
     }));
 
-
-
     const capacity = Number(value);
-
-
 
     if (
 
@@ -791,8 +702,6 @@ function ScheduleBatches() {
 
   };
 
-
-
   const handleCreateBatch = async (
 
     event
@@ -800,8 +709,6 @@ function ScheduleBatches() {
   ) => {
 
     event.preventDefault();
-
-
 
     if (!form.batchName.trim()) {
 
@@ -815,13 +722,9 @@ function ScheduleBatches() {
 
       });
 
-
-
       return;
 
     }
-
-
 
     if (!form.schoolYear.trim()) {
 
@@ -835,13 +738,9 @@ function ScheduleBatches() {
 
       });
 
-
-
       return;
 
     }
-
-
 
     if (!form.semester) {
 
@@ -855,13 +754,9 @@ function ScheduleBatches() {
 
       });
 
-
-
       return;
 
     }
-
-
 
     if (
 
@@ -883,13 +778,9 @@ function ScheduleBatches() {
 
       });
 
-
-
       return;
 
     }
-
-
 
     if (
 
@@ -907,19 +798,13 @@ function ScheduleBatches() {
 
       });
 
-
-
       return;
 
     }
 
-
-
     const capacity =
 
       Number(form.maxStudents);
-
-
 
     if (
 
@@ -939,13 +824,9 @@ function ScheduleBatches() {
 
       });
 
-
-
       return;
 
     }
-
-
 
     if (!selectedSteps.length) {
 
@@ -959,13 +840,14 @@ function ScheduleBatches() {
 
       });
 
-
-
       return;
 
     }
 
-
+    if (new Date(`${form.scheduleDate}T${form.endTime}`) <= new Date()) {
+      await Swal.fire({ icon: "warning", title: "Schedule Already Passed", text: "Choose a future date and time for the batch." });
+      return;
+    }
 
     const confirmation =
 
@@ -1003,21 +885,15 @@ function ScheduleBatches() {
 
       });
 
-
-
     if (!confirmation.isConfirmed) {
 
       return;
 
     }
 
-
-
     try {
 
       setSaving(true);
-
-
 
       const result =
 
@@ -1061,15 +937,11 @@ function ScheduleBatches() {
 
         });
 
-
-
       setShowCreateModal(false);
 
       setSelectedSteps([]);
 
       setForm(INITIAL_FORM);
-
-
 
       await Swal.fire({
 
@@ -1091,8 +963,6 @@ function ScheduleBatches() {
 
       });
 
-
-
       await loadData(true);
 
     } catch (error) {
@@ -1104,8 +974,6 @@ function ScheduleBatches() {
         error
 
       );
-
-
 
       await Swal.fire({
 
@@ -1129,72 +997,253 @@ function ScheduleBatches() {
 
   };
 
-
-
   const openManageBatch = async (batch) => {
+
     try {
+
       const students = await getTreasurerBatchStudents(batch.id);
+
       setManageStudents(Array.isArray(students) ? students : []);
+
       setEditForm({
+
         batchName: batch.batch_name || "",
+
         scheduleDate: batch.schedule_date || "",
+
         startTime: String(batch.start_time || "").slice(0, 5),
+
         endTime: String(batch.end_time || "").slice(0, 5),
+
         studentNote: batch.student_note || "",
+
         maxStudents: batch.max_students || 30,
+
         status: batch.status || "Open",
+
       });
+
       setManageBatch(batch);
+      setShowAddStudents(false);
+      setAddSelected([]);
+      setAddSearch("");
+
     } catch (error) {
+
       Swal.fire({ icon: "error", title: "Unable to Manage Batch", text: error?.message || "Unable to load this batch." });
+
     }
+
+  };
+
+  const availableForManage = useMemo(() => {
+    if (!manageBatch) return [];
+    const already = new Set(manageStudents.map((s) => s.clearance_step_id));
+    return eligibleStudents.filter((s) =>
+      !already.has(s.clearance_step_id) &&
+      String(s.school_year || "").trim() === String(manageBatch.school_year || "").trim() &&
+      String(s.semester || "").trim().toLowerCase() === String(manageBatch.semester || "").trim().toLowerCase()
+    );
+  }, [manageBatch, manageStudents, eligibleStudents]);
+
+  const filteredForManage = useMemo(() => {
+    const q = addSearch.trim().toLowerCase();
+    return availableForManage.filter((s) => {
+      if (addCourse !== "All" && String(s.course || "") !== addCourse) return false;
+      if (addYear !== "All" && String(s.year_level || "") !== addYear) return false;
+      return !q || [s.full_name, s.student_number, s.course, s.year_level, s.section]
+        .filter(Boolean).join(" ").toLowerCase().includes(q);
+    });
+  }, [availableForManage, addSearch, addCourse, addYear]);
+
+  const remainingCapacity = manageBatch
+    ? Math.max(0, Number(editForm.maxStudents || manageBatch.max_students || 0) - manageStudents.length)
+    : 0;
+
+  const toggleAddStudent = (id) => {
+    setAddSelected((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= remainingCapacity) {
+        Swal.fire({ icon: "info", title: "Batch Capacity Reached", text: "Increase Maximum Students in Manage Batch and save it first if more slots are needed." });
+        return prev;
+      }
+      return [...prev, id];
+    });
+  };
+
+  const saveAddedStudents = async () => {
+    if (getEffectiveBatchStatus(manageBatch) !== "Open") {
+      await Swal.fire({ icon: "warning", title: "Batch Not Available", text: "Only currently Open batches can accept new students. Create a new future batch instead." });
+      return;
+    }
+    if (!manageBatch?.id || !addSelected.length) return;
+    const confirmed = await Swal.fire({
+      icon: "question", title: "Add Students to Batch?",
+      text: `Assign ${addSelected.length} student(s) to ${manageBatch.batch_name}?`,
+      showCancelButton: true, confirmButtonText: "Add Students", confirmButtonColor: "#1d4ed8"
+    });
+    if (!confirmed.isConfirmed) return;
+    try {
+      setSavingAdd(true);
+      await addStudentsToTreasurerBatch({ batchId: manageBatch.id, clearanceStepIds: addSelected });
+      const [students, eligible] = await Promise.all([
+        getTreasurerBatchStudents(manageBatch.id), getTreasurerEligibleStudents()
+      ]);
+      setManageStudents(Array.isArray(students) ? students : []);
+      setEligibleStudents(Array.isArray(eligible) ? eligible : []);
+      setAddSelected([]);
+      setShowAddStudents(false);
+      await Swal.fire({ icon: "success", title: "Students Added", timer: 1600, showConfirmButton: false });
+      await loadData(true);
+    } catch (error) {
+      await Swal.fire({ icon: "error", title: "Unable to Add Students", text: error?.message || "Please check the Treasurer batch assignment RPC." });
+    } finally { setSavingAdd(false); }
   };
 
   const saveManagedBatch = async (event) => {
+
     event.preventDefault();
+
     if (!manageBatch?.id) return;
+
     const capacity = Number(editForm.maxStudents);
+
     if (!editForm.batchName.trim()) return Swal.fire({ icon: "warning", title: "Batch Name Required" });
+
     if (!editForm.scheduleDate || !editForm.startTime || !editForm.endTime) return Swal.fire({ icon: "warning", title: "Schedule Required" });
+
     if (editForm.endTime <= editForm.startTime) return Swal.fire({ icon: "warning", title: "Invalid Time", text: "End time must be later than start time." });
+
     if (!Number.isInteger(capacity) || capacity < manageStudents.length || capacity <= 0) return Swal.fire({ icon: "warning", title: "Invalid Capacity", text: `This batch already has ${manageStudents.length} assigned student(s).` });
 
     if (["Completed", "Cancelled"].includes(editForm.status) && editForm.status !== manageBatch.status) {
+
       const result = await Swal.fire({ icon: "warning", title: `${editForm.status} Batch?`, text: "Student review records will be preserved.", showCancelButton: true, confirmButtonText: "Confirm" });
+
       if (!result.isConfirmed) return;
+
     }
 
     try {
+
       setSavingManage(true);
+
       await updateTreasurerBatch(manageBatch.id, {
+
         batchName: editForm.batchName,
+
         scheduleDate: editForm.scheduleDate,
+
         startTime: editForm.startTime,
+
         endTime: editForm.endTime,
+
         studentNote: editForm.studentNote,
+
         maxStudents: capacity,
+
       });
+
       if (editForm.status !== manageBatch.status) await updateTreasurerBatchStatus(manageBatch.id, editForm.status);
+
       setManageBatch(null);
+
       await Swal.fire({ icon: "success", title: "Batch Updated", timer: 1500, showConfirmButton: false });
+
       await loadData(true);
+
     } catch (error) {
+
       Swal.fire({ icon: "error", title: "Unable to Update Batch", text: error?.message || "Update failed." });
+
     } finally {
+
       setSavingManage(false);
+
     }
+
+  };
+
+  const handleReviewReschedule = async (request, decision) => {
+    let available = [];
+    if (decision === "Approved") {
+      // The preferred date is a request, not a restriction on the approved date.
+      // Only future, Open batches in the same academic period are eligible.
+      const candidates = batches.filter((batch) =>
+        batch.id !== request.source_batch_id &&
+        getEffectiveBatchStatus(batch) === "Open" &&
+        batch.school_year === request.school_year &&
+        batch.semester === request.semester
+      );
+      try {
+        const checked = await Promise.all(candidates.map(async (batch) => {
+          const assigned = await getTreasurerBatchStudents(batch.id);
+          return { ...batch, assignedCount: Array.isArray(assigned) ? assigned.length : 0 };
+        }));
+        available = checked.filter((batch) => batch.assignedCount < Number(batch.max_students || 0));
+      } catch (error) {
+        await Swal.fire({ icon: "error", title: "Unable to Check Batch Capacity", text: error?.message || "Please try again." });
+        return;
+      }
+      if (!available.length) {
+        await Swal.fire({
+          icon: "info", title: "No Available Batch",
+          text: "Create an Open future batch with the same semester and school year and an available student slot, then approve the request."
+        });
+        return;
+      }
+    }
+    const options = Object.fromEntries(available.map((batch) => [
+      batch.id,
+      `${batch.batch_name} — ${formatDate(batch.schedule_date)} (${formatTime(batch.start_time)} - ${formatTime(batch.end_time)}) — ${batch.assignedCount}/${batch.max_students} students`
+    ]));
+    const result = await Swal.fire({
+      title: decision === "Approved" ? "Approve Reschedule" : "Reject Reschedule",
+      html: decision === "Approved"
+        ? `<p style="margin-bottom:12px">Preferred date: <strong>${formatDate(request.preferred_date)}</strong>. You may choose another available date. The selected batch becomes the student's approved schedule.</p>`
+        : `<p style="margin-bottom:12px">The student's current schedule will remain unchanged.</p>`,
+      input: decision === "Approved" ? "select" : "textarea",
+      inputOptions: decision === "Approved" ? options : undefined,
+      inputPlaceholder: decision === "Approved" ? "Select destination batch" : "Reason for rejection (optional)",
+      inputValidator: decision === "Approved" ? (value) => !value ? "Select a destination batch" : undefined : undefined,
+      showCancelButton: true,
+      confirmButtonText: decision === "Approved" ? "Approve & Transfer" : "Reject",
+      confirmButtonColor: decision === "Approved" ? "#047857" : "#b91c1c",
+    });
+    if (!result.isConfirmed) return;
+    try {
+      setReviewingRequest(request.id);
+      const chosen = available.find((batch) => batch.id === result.value);
+      await reviewTreasurerReschedule({
+        requestId: request.id, decision,
+        targetBatchId: decision === "Approved" ? result.value : null,
+        remarks: decision === "Rejected" ? result.value :
+          `Approved transfer to ${chosen?.batch_name || "selected batch"} on ${chosen?.schedule_date || "scheduled date"}`,
+      });
+      await loadData(true);
+      await Swal.fire({ icon: "success", title: `Request ${decision}`, timer: 1600, showConfirmButton: false });
+    } catch (error) {
+      await Swal.fire({ icon: "error", title: "Unable to Review Request", text: error?.message || "Please try again." });
+    } finally { setReviewingRequest(null); }
   };
 
   const openViewStudents = async (batch) => {
-    setViewBatch(batch); setViewStudents([]); setLoadingView(true);
-    try {
-      const students = await getTreasurerBatchStudents(batch.id);
-      setViewStudents(Array.isArray(students) ? students : []);
-    } catch (error) {
-      Swal.fire({ icon: "error", title: "Unable to Load Students", text: error?.message || "Unable to load students." });
-    } finally { setLoadingView(false); }
-  };
 
+    setViewBatch(batch); setViewStudents([]); setLoadingView(true);
+
+    try {
+
+      const students = await getTreasurerBatchStudents(batch.id);
+
+      setViewStudents(Array.isArray(students) ? students : []);
+
+    } catch (error) {
+
+      Swal.fire({ icon: "error", title: "Unable to Load Students", text: error?.message || "Unable to load students." });
+
+    } finally { setLoadingView(false); }
+
+  };
 
   if (loading) {
 
@@ -1207,8 +1256,6 @@ function ScheduleBatches() {
           <div className="text-center">
 
             <div className="mx-auto h-11 w-11 animate-spin rounded-full border-4 border-slate-200 border-t-blue-700" />
-
-
 
             <p className="mt-4 text-sm font-bold text-slate-500">
 
@@ -1225,8 +1272,6 @@ function ScheduleBatches() {
     );
 
   }
-
-
 
   return (
 
@@ -1262,8 +1307,6 @@ function ScheduleBatches() {
 
             <div className="absolute -right-16 -top-16 h-52 w-52 rounded-full bg-blue-500/10 blur-3xl" />
 
-
-
             <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
 
               <div>
@@ -1276,15 +1319,11 @@ function ScheduleBatches() {
 
                 </div>
 
-
-
                 <h1 className="text-2xl font-black md:text-3xl">
 
                   Schedule & Batches
 
                 </h1>
-
-
 
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
 
@@ -1299,8 +1338,6 @@ function ScheduleBatches() {
                 </p>
 
               </div>
-
-
 
               <div className="flex flex-wrap gap-2">
 
@@ -1338,8 +1375,6 @@ function ScheduleBatches() {
 
                 </button>
 
-
-
                 <button
 
                   type="button"
@@ -1364,8 +1399,6 @@ function ScheduleBatches() {
 
         </motion.section>
 
-
-
         {/* SUMMARY */}
 
         <section className="grid gap-3 sm:grid-cols-3">
@@ -1382,8 +1415,6 @@ function ScheduleBatches() {
 
                 </p>
 
-
-
                 <p className="mt-2 text-3xl font-black text-slate-900">
 
                   {
@@ -1396,8 +1427,6 @@ function ScheduleBatches() {
 
               </div>
 
-
-
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
 
                 <FaUserGraduate />
@@ -1407,8 +1436,6 @@ function ScheduleBatches() {
             </div>
 
           </div>
-
-
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
 
@@ -1422,8 +1449,6 @@ function ScheduleBatches() {
 
                 </p>
 
-
-
                 <p className="mt-2 text-3xl font-black text-slate-900">
 
                   {
@@ -1432,7 +1457,7 @@ function ScheduleBatches() {
 
                       (batch) =>
 
-                        batch.status ===
+                        getEffectiveBatchStatus(batch) ===
 
                         "Open"
 
@@ -1444,8 +1469,6 @@ function ScheduleBatches() {
 
               </div>
 
-
-
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
 
                 <FaCalendarAlt />
@@ -1455,8 +1478,6 @@ function ScheduleBatches() {
             </div>
 
           </div>
-
-
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
 
@@ -1470,8 +1491,6 @@ function ScheduleBatches() {
 
                 </p>
 
-
-
                 <p className="mt-2 text-3xl font-black text-slate-900">
 
                   {batches.length}
@@ -1479,8 +1498,6 @@ function ScheduleBatches() {
                 </p>
 
               </div>
-
-
 
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
 
@@ -1494,7 +1511,51 @@ function ScheduleBatches() {
 
         </section>
 
-
+        {/* TREASURER RESCHEDULE REQUESTS */}
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+          <button
+            type="button"
+            onClick={() => setShowRescheduleRequests((previous) => !previous)}
+            aria-expanded={showRescheduleRequests}
+            className="flex w-full flex-wrap items-center justify-between gap-3 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          >
+            <div>
+              <h2 className="text-xl font-black text-slate-900">Student Reschedule Requests</h2>
+              <p className="mt-1 text-sm text-slate-500">Click to {showRescheduleRequests ? "hide" : "view"} student requests.</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`rounded-full px-3 py-1 text-xs font-black ${rescheduleRequests.some((r) => r.status === "Pending") ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-600"}`}>
+                {rescheduleRequests.filter((r) => r.status === "Pending").length} Pending
+              </span>
+              <FaChevronDown className={`text-slate-500 transition-transform duration-200 ${showRescheduleRequests ? "rotate-180" : ""}`} />
+            </div>
+          </button>
+          {showRescheduleRequests && (
+            <div className="mt-4 border-t border-slate-100 pt-4">
+          {rescheduleRequests.filter((r) => r.status === "Pending").length === 0 ? <p className="rounded-xl bg-slate-50 p-5 text-sm text-slate-500">No pending reschedule requests.</p> : (
+            <div className="space-y-3">
+              {rescheduleRequests.filter((request) => request.status === "Pending").map((request) => (
+                <div key={request.id} className="rounded-2xl border border-slate-200 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div><p className="font-black text-slate-900">{request.student_name || "Student"} <span className="text-xs font-semibold text-slate-500">{request.student_number || ""}</span></p>
+                      <p className="mt-1 text-xs text-slate-500">{request.course || ""} {request.year_level ? `• Year ${request.year_level}` : ""} • {request.source_batch_name || "Original batch"}</p>
+                    </div>
+                    <span className={`rounded-full px-3 py-1 text-xs font-black ${request.status === "Pending" ? "bg-amber-100 text-amber-800" : request.status === "Approved" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>{request.status}</span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2"><p><span className="font-bold text-slate-500">Original:</span> {formatDate(request.source_schedule_date)}</p><p><span className="font-bold text-slate-500">Preferred:</span> {formatDate(request.preferred_date)}</p></div>
+                  <p className="mt-2 text-sm text-slate-700"><span className="font-bold">Reason:</span> {request.reason}</p>
+                  {request.review_remarks && <p className="mt-2 text-xs text-slate-500">Treasurer response: {request.review_remarks}</p>}
+                  {request.status === "Pending" && <div className="mt-4 flex flex-wrap gap-2">
+                    <button type="button" disabled={!!reviewingRequest} onClick={() => handleReviewReschedule(request, "Approved")} className="rounded-xl bg-emerald-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50">Approve & Transfer</button>
+                    <button type="button" disabled={!!reviewingRequest} onClick={() => handleReviewReschedule(request, "Rejected")} className="rounded-xl border border-rose-200 px-4 py-2 text-xs font-black text-rose-700 disabled:opacity-50">Reject</button>
+                  </div>}
+                </div>
+              ))}
+            </div>
+          )}
+            </div>
+          )}
+        </section>
 
         {/* BATCH LIST */}
 
@@ -1528,8 +1589,6 @@ function ScheduleBatches() {
 
             </h2>
 
-
-
             <p className="mt-1 text-sm text-slate-500">
 
               Students assigned to a batch
@@ -1542,8 +1601,6 @@ function ScheduleBatches() {
 
           </div>
 
-
-
           <div className="p-5 md:p-6">
 
             {batches.length === 0 ? (
@@ -1552,15 +1609,11 @@ function ScheduleBatches() {
 
                 <FaCalendarAlt className="mx-auto text-4xl text-slate-300" />
 
-
-
                 <h3 className="mt-4 text-lg font-black text-slate-800">
 
                   No Schedule Batches Yet
 
                 </h3>
-
-
 
                 <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">
 
@@ -1573,8 +1626,6 @@ function ScheduleBatches() {
                   clearance.
 
                 </p>
-
-
 
                 <button
 
@@ -1648,8 +1699,6 @@ function ScheduleBatches() {
 
                           </h3>
 
-
-
                           <p className="mt-1 text-sm font-semibold text-slate-500">
 
                             {
@@ -1670,25 +1719,21 @@ function ScheduleBatches() {
 
                         </div>
 
-
-
                         <span
 
                           className={`shrink-0 rounded-full px-3 py-1 text-xs font-black ring-1 ring-inset ${getStatusStyle(
 
-                            batch.status
+                            getEffectiveBatchStatus(batch)
 
                           )}`}
 
                         >
 
-                          {batch.status}
+                          {getEffectiveBatchStatus(batch)}
 
                         </span>
 
                       </div>
-
-
 
                       <div className="mt-5 grid gap-3 sm:grid-cols-2">
 
@@ -1699,8 +1744,6 @@ function ScheduleBatches() {
                             Date
 
                           </p>
-
-
 
                           <p className="mt-1 font-black text-slate-800">
 
@@ -1714,8 +1757,6 @@ function ScheduleBatches() {
 
                         </div>
 
-
-
                         <div className="rounded-xl bg-slate-50 p-3">
 
                           <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
@@ -1723,8 +1764,6 @@ function ScheduleBatches() {
                             Time
 
                           </p>
-
-
 
                           <p className="mt-1 font-black text-slate-800">
 
@@ -1748,13 +1787,9 @@ function ScheduleBatches() {
 
                       </div>
 
-
-
                       <div className="mt-3 flex items-center gap-2 text-sm font-semibold text-slate-600">
 
                         <FaUsers className="text-blue-600" />
-
-
 
                         Maximum{" "}
 
@@ -1763,8 +1798,6 @@ function ScheduleBatches() {
                         students
 
                       </div>
-
-
 
                       {batch.student_note && (
 
@@ -1775,8 +1808,6 @@ function ScheduleBatches() {
                             Student Note
 
                           </p>
-
-
 
                           <p className="mt-1 text-sm leading-6 text-blue-900">
 
@@ -1793,8 +1824,11 @@ function ScheduleBatches() {
                       )}
 
                       <div className="mt-5 grid grid-cols-2 gap-2 border-t border-slate-100 pt-4">
+
                         <button type="button" onClick={() => openViewStudents(batch)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-black text-slate-700 hover:bg-slate-50"><FaEye /> View Students</button>
+
                         <button type="button" onClick={() => openManageBatch(batch)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white hover:bg-slate-800"><FaEdit /> Manage Batch</button>
+
                       </div>
 
                     </motion.article>
@@ -1812,8 +1846,6 @@ function ScheduleBatches() {
         </motion.section>
 
       </div>
-
-
 
       {/* CREATE BATCH MODAL */}
 
@@ -1869,15 +1901,11 @@ function ScheduleBatches() {
 
                     </p>
 
-
-
                     <h2 className="mt-1 text-xl font-black text-slate-900 md:text-2xl">
 
                       Create Student Batch
 
                     </h2>
-
-
 
                     <p className="mt-1 text-sm text-slate-500">
 
@@ -1892,8 +1920,6 @@ function ScheduleBatches() {
                     </p>
 
                   </div>
-
-
 
                   <button
 
@@ -1916,8 +1942,6 @@ function ScheduleBatches() {
                 </div>
 
               </div>
-
-
 
               <form
 
@@ -1944,8 +1968,6 @@ function ScheduleBatches() {
                         Batch Name
 
                       </label>
-
-
 
                       <input
 
@@ -1985,8 +2007,6 @@ function ScheduleBatches() {
 
                     </div>
 
-
-
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
 
                       <div>
@@ -1996,8 +2016,6 @@ function ScheduleBatches() {
                           School Year
 
                         </label>
-
-
 
                         <input
 
@@ -2047,8 +2065,6 @@ function ScheduleBatches() {
 
                       </div>
 
-
-
                       <div>
 
                         <label className="mb-2 block text-sm font-black text-slate-700">
@@ -2056,8 +2072,6 @@ function ScheduleBatches() {
                           Semester
 
                         </label>
-
-
 
                         <select
 
@@ -2107,23 +2121,17 @@ function ScheduleBatches() {
 
                           </option>
 
-
-
                           <option value="1st Semester">
 
                             1st Semester
 
                           </option>
 
-
-
                           <option value="2nd Semester">
 
                             2nd Semester
 
                           </option>
-
-
 
                           <option value="Summer">
 
@@ -2137,8 +2145,6 @@ function ScheduleBatches() {
 
                     </div>
 
-
-
                     <div>
 
                       <label className="mb-2 block text-sm font-black text-slate-700">
@@ -2146,8 +2152,6 @@ function ScheduleBatches() {
                         Schedule Date
 
                       </label>
-
-
 
                       <input
 
@@ -2185,8 +2189,6 @@ function ScheduleBatches() {
 
                     </div>
 
-
-
                     <div className="grid grid-cols-2 gap-3">
 
                       <div>
@@ -2196,8 +2198,6 @@ function ScheduleBatches() {
                           Start Time
 
                         </label>
-
-
 
                         <input
 
@@ -2245,8 +2245,6 @@ function ScheduleBatches() {
 
                       </div>
 
-
-
                       <div>
 
                         <label className="mb-2 block text-sm font-black text-slate-700">
@@ -2254,8 +2252,6 @@ function ScheduleBatches() {
                           End Time
 
                         </label>
-
-
 
                         <input
 
@@ -2305,8 +2301,6 @@ function ScheduleBatches() {
 
                     </div>
 
-
-
                     <div>
 
                       <label className="mb-2 block text-sm font-black text-slate-700">
@@ -2314,8 +2308,6 @@ function ScheduleBatches() {
                         Maximum Students
 
                       </label>
-
-
 
                       <input
 
@@ -2341,8 +2333,6 @@ function ScheduleBatches() {
 
                     </div>
 
-
-
                     <div>
 
                       <label className="mb-2 block text-sm font-black text-slate-700">
@@ -2350,8 +2340,6 @@ function ScheduleBatches() {
                         Note for Students
 
                       </label>
-
-
 
                       <textarea
 
@@ -2393,8 +2381,6 @@ function ScheduleBatches() {
 
                   </div>
 
-
-
                   {/* STUDENT SELECTION */}
 
                   <div className="min-w-0">
@@ -2412,8 +2398,6 @@ function ScheduleBatches() {
                               Select Students
 
                             </h3>
-
-
 
                             <p className="mt-1 text-xs font-semibold text-slate-500">
 
@@ -2436,8 +2420,6 @@ function ScheduleBatches() {
                             </p>
 
                           </div>
-
-
 
                           <button
 
@@ -2471,15 +2453,11 @@ function ScheduleBatches() {
 
                         </div>
 
-
-
-                        <div className="mt-4 grid gap-2 md:grid-cols-[minmax(200px,1fr)\_150px_130px]">
+                        <div className="mt-4 grid gap-2 md:grid-cols-[minmax(200px,1fr)\\_150px_130px]">
 
                           <div className="relative">
 
                             <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-
-
 
                             <input
 
@@ -2517,8 +2495,6 @@ function ScheduleBatches() {
 
                           </div>
 
-
-
                           <select
 
                             value={
@@ -2552,8 +2528,6 @@ function ScheduleBatches() {
                               All Courses
 
                             </option>
-
-
 
                             {courseOptions.map(
 
@@ -2589,8 +2563,6 @@ function ScheduleBatches() {
 
                           </select>
 
-
-
                           <select
 
                             value={
@@ -2624,8 +2596,6 @@ function ScheduleBatches() {
                               All Years
 
                             </option>
-
-
 
                             {yearOptions.map(
 
@@ -2663,8 +2633,6 @@ function ScheduleBatches() {
 
                       </div>
 
-
-
                       <div className="max-h-[520px] overflow-y-auto p-3">
 
                         {filteredStudents.length ===
@@ -2675,8 +2643,6 @@ function ScheduleBatches() {
 
                             <FaUserGraduate className="mx-auto text-4xl text-slate-300" />
 
-
-
                             <p className="mt-4 font-black text-slate-700">
 
                               No eligible
@@ -2684,8 +2650,6 @@ function ScheduleBatches() {
                               students
 
                             </p>
-
-
 
                             <p className="mt-1 text-sm text-slate-500">
 
@@ -2724,8 +2688,6 @@ function ScheduleBatches() {
                                     student.clearance_step_id
 
                                   );
-
-
 
                                 return (
 
@@ -2779,8 +2741,6 @@ function ScheduleBatches() {
 
                                     </div>
 
-
-
                                     <div className="min-w-0 flex-1">
 
                                       <p className="truncate font-black text-slate-900">
@@ -2792,8 +2752,6 @@ function ScheduleBatches() {
                                         }
 
                                       </p>
-
-
 
                                       <p className="mt-1 truncate text-xs font-semibold text-slate-500">
 
@@ -2820,8 +2778,6 @@ function ScheduleBatches() {
                                           "No Block"}
 
                                       </p>
-
-
 
                                       <p className="mt-1 text-[11px] font-semibold text-slate-400">
 
@@ -2863,8 +2819,6 @@ function ScheduleBatches() {
 
                 </div>
 
-
-
                 <div className="mt-6 flex flex-col-reverse gap-2 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
 
                   <p className="text-sm font-semibold text-slate-500">
@@ -2889,8 +2843,6 @@ function ScheduleBatches() {
 
                   </p>
 
-
-
                   <div className="flex gap-2">
 
                     <button
@@ -2912,8 +2864,6 @@ function ScheduleBatches() {
                       Cancel
 
                     </button>
-
-
 
                     <button
 
@@ -2971,37 +2921,100 @@ function ScheduleBatches() {
 
       </AnimatePresence>
 
-
       <AnimatePresence>
+
         {manageBatch && (
+
           <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+
             <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+
               <div className="flex items-start justify-between border-b border-slate-200 p-6">
+
                 <div><p className="text-xs font-black uppercase tracking-wider text-blue-700">Manage Schedule</p><h2 className="mt-1 text-2xl font-black text-slate-900">Edit Treasurer Batch</h2><p className="mt-1 text-sm text-slate-500">{manageBatch.semester} • {manageBatch.school_year} • {manageStudents.length} assigned</p></div>
+
                 <button type="button" onClick={() => setManageBatch(null)} disabled={savingManage} className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100"><FaTimes /></button>
+
               </div>
-              <form onSubmit={saveManagedBatch} className="space-y-4 p-6">
+
+                <div className="mx-6 mt-5 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-black text-slate-900">Assigned Students: {manageStudents.length} / {manageBatch.max_students}</p>
+                      <p className="mt-1 text-xs text-slate-600">Add eligible students to this existing batch without creating another schedule.</p>
+                    </div>
+                    <button type="button" onClick={() => { setShowAddStudents((v) => !v); setAddSelected([]); }} disabled={savingManage || getEffectiveBatchStatus(manageBatch) !== "Open"} className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white disabled:opacity-50"><FaPlus /> {showAddStudents ? "Hide Selection" : "Add Students"}</button>
+                  </div>
+                  {showAddStudents && (
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+                      <p className="mb-3 text-sm font-bold text-slate-700">{remainingCapacity} available slot(s) • {availableForManage.length} eligible for {manageBatch.semester}, {manageBatch.school_year}</p>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <input value={addSearch} onChange={(e) => setAddSearch(e.target.value)} placeholder="Search name / Student ID" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                        <select value={addCourse} onChange={(e) => setAddCourse(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm"><option value="All">All Courses</option>{[...new Set(availableForManage.map((s) => String(s.course || "")).filter(Boolean))].sort().map((v) => <option key={v} value={v}>{v}</option>)}</select>
+                        <select value={addYear} onChange={(e) => setAddYear(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm"><option value="All">All Years</option>{[...new Set(availableForManage.map((s) => String(s.year_level || "")).filter(Boolean))].sort().map((v) => <option key={v} value={v}>Year {v}</option>)}</select>
+                      </div>
+                      <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
+                        {filteredForManage.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">No eligible unscheduled students match this batch or search.</p> : filteredForManage.map((student) => (
+                          <label key={student.clearance_step_id} className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-3 hover:bg-slate-50">
+                            <input type="checkbox" checked={addSelected.includes(student.clearance_step_id)} onChange={() => toggleAddStudent(student.clearance_step_id)} className="h-4 w-4" />
+                            <span className="min-w-0"><span className="block truncate text-sm font-black text-slate-900">{student.full_name || "Student"}</span><span className="block text-xs text-slate-500">{student.student_number || "No ID"} • {student.course || "N/A"} • Year {student.year_level || "N/A"} • {student.section || "No Block"}</span></span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+                        <span className="text-sm font-semibold text-slate-600">{addSelected.length} selected</span>
+                        <div className="flex gap-2"><button type="button" onClick={() => setAddSelected((prev) => { const next = [...prev]; for (const s of filteredForManage) { if (next.length >= remainingCapacity) break; if (!next.includes(s.clearance_step_id)) next.push(s.clearance_step_id); } return next; })} className="rounded-lg border border-blue-200 px-3 py-2 text-xs font-black text-blue-700">Select Visible</button><button type="button" onClick={saveAddedStudents} disabled={savingAdd || addSelected.length === 0 || getEffectiveBatchStatus(manageBatch) !== "Open"} className="rounded-lg bg-blue-700 px-4 py-2 text-xs font-black text-white disabled:opacity-50">{savingAdd ? "Adding..." : "Save Students"}</button></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                             {getEffectiveBatchStatus(manageBatch) === "Expired" && (
+                 <p className="mx-6 mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-800">
+                   This batch's schedule has expired. Its stored status is unchanged. To schedule new visits, create a future batch.
+                 </p>
+               )}
+<form onSubmit={saveManagedBatch} className="space-y-4 p-6">
+
                 <div><label className="mb-2 block text-sm font-black text-slate-700">Batch Name</label><input value={editForm.batchName} onChange={(e) => setEditForm((p) => ({...p,batchName:e.target.value}))} className="w-full rounded-xl border border-slate-200 px-4 py-3" /></div>
+
                 <div><label className="mb-2 block text-sm font-black text-slate-700">Schedule Date</label><input type="date" value={editForm.scheduleDate} onChange={(e) => setEditForm((p) => ({...p,scheduleDate:e.target.value}))} className="w-full rounded-xl border border-slate-200 px-4 py-3" /></div>
+
                 <div className="grid grid-cols-2 gap-3"><div><label className="mb-2 block text-sm font-black text-slate-700">Start Time</label><input type="time" value={editForm.startTime} onChange={(e) => setEditForm((p) => ({...p,startTime:e.target.value}))} className="w-full rounded-xl border border-slate-200 px-4 py-3" /></div><div><label className="mb-2 block text-sm font-black text-slate-700">End Time</label><input type="time" value={editForm.endTime} onChange={(e) => setEditForm((p) => ({...p,endTime:e.target.value}))} className="w-full rounded-xl border border-slate-200 px-4 py-3" /></div></div>
+
                 <div className="grid grid-cols-2 gap-3"><div><label className="mb-2 block text-sm font-black text-slate-700">Maximum Students</label><input type="number" min={Math.max(1,manageStudents.length)} value={editForm.maxStudents} onChange={(e) => setEditForm((p) => ({...p,maxStudents:e.target.value}))} className="w-full rounded-xl border border-slate-200 px-4 py-3" /></div><div><label className="mb-2 block text-sm font-black text-slate-700">Status</label><select value={editForm.status} onChange={(e) => setEditForm((p) => ({...p,status:e.target.value}))} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3">{["Draft","Open","Closed","Completed","Cancelled"].map((x)=><option key={x}>{x}</option>)}</select></div></div>
+
                 <div><label className="mb-2 block text-sm font-black text-slate-700">Note for Students</label><textarea rows={5} value={editForm.studentNote} onChange={(e) => setEditForm((p) => ({...p,studentNote:e.target.value}))} className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3" /><p className="mt-2 text-xs font-semibold text-slate-500">Updated schedule and note will appear in the student's Clearance Status.</p></div>
+
                 <div className="flex justify-end gap-2 border-t border-slate-200 pt-5"><button type="button" onClick={() => setManageBatch(null)} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-black">Cancel</button><button type="submit" disabled={savingManage} className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{savingManage ? <><FaSyncAlt className="animate-spin" /> Saving...</> : <><FaSave /> Save Changes</>}</button></div>
+
               </form>
+
             </motion.div>
+
           </div>
+
         )}
+
       </AnimatePresence>
 
       <AnimatePresence>
+
         {viewBatch && (
+
           <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+
             <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }} className="max-h-[94vh] w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+
               <div className="flex items-start justify-between border-b border-slate-200 p-6"><div><p className="text-xs font-black uppercase tracking-wider text-blue-700">Batch Students</p><h2 className="mt-1 text-2xl font-black text-slate-900">{viewBatch.batch_name}</h2><p className="mt-1 text-sm text-slate-500">{formatDate(viewBatch.schedule_date)} • {formatTime(viewBatch.start_time)} - {formatTime(viewBatch.end_time)} • {viewStudents.length}/{viewBatch.max_students} assigned</p></div><button type="button" onClick={() => setViewBatch(null)} className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100"><FaTimes /></button></div>
+
               <div className="max-h-[65vh] overflow-y-auto p-6">{loadingView ? <div className="py-16 text-center"><FaSyncAlt className="mx-auto animate-spin text-3xl text-blue-700" /><p className="mt-3 text-sm font-bold text-slate-500">Loading students...</p></div> : viewStudents.length === 0 ? <div className="py-16 text-center text-slate-500">No students assigned.</div> : <div className="space-y-3">{viewStudents.map((item) => { const student=item.users||{}; return <div key={item.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-black text-slate-900">{student.full_name||"Student"}</p><p className="mt-1 text-sm font-semibold text-slate-500">{student.student_id||"No Student ID"} • {student.course||"N/A"}{student.year_level?` • Year ${student.year_level}`:""}{student.section?` • ${student.section}`:""}</p></div><span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">{item.financial_status||"Scheduled"}</span></div>; })}</div>}</div>
+
             </motion.div>
+
           </div>
+
         )}
+
       </AnimatePresence>
 
     </TreasurerLayout>
@@ -3009,7 +3022,5 @@ function ScheduleBatches() {
   );
 
 }
-
-
 
 export default ScheduleBatches;

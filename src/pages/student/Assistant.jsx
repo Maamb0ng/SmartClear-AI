@@ -442,6 +442,25 @@ function Assistant() {
     setContextUpdatedAt,
   ] = useState(null);
 
+  const chatsRef = useRef(chats);
+  const conversationRef = useRef({ previousInteractionId: null, activeModel: null, draftMessage: "" });
+  const storageKeyRef = useRef(null);
+
+  const persistConversation = useCallback((overrides = {}) => {
+    const key = storageKeyRef.current;
+    if (!key) return;
+    try {
+      const current = { ...conversationRef.current, ...overrides };
+      localStorage.setItem(key, JSON.stringify({
+        chats: chatsRef.current,
+        ...current,
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      console.error("Unable to save AI conversation:", error);
+    }
+  }, []);
+
   const chatContainerRef =
     useRef(null);
 
@@ -1218,6 +1237,7 @@ function Assistant() {
           const storageKey =
             `${CHAT_STORAGE_PREFIX}:${user.id}`;
 
+          storageKeyRef.current = storageKey;
           setChatStorageKey(
             storageKey
           );
@@ -1246,10 +1266,21 @@ function Assistant() {
               storedChats.length >
               0
             ) {
+              chatsRef.current = storedChats;
               setChats(
                 storedChats
               );
             }
+
+            conversationRef.current.previousInteractionId =
+              typeof storedConversation?.previousInteractionId === "string"
+                ? storedConversation.previousInteractionId : null;
+            conversationRef.current.activeModel =
+              typeof storedConversation?.activeModel === "string"
+                ? storedConversation.activeModel : null;
+            conversationRef.current.draftMessage =
+              typeof storedConversation?.draftMessage === "string"
+                ? storedConversation.draftMessage : "";
 
             setPreviousInteractionId(
               typeof storedConversation
@@ -1317,15 +1348,15 @@ function Assistant() {
       return;
     }
 
+    conversationRef.current.draftMessage = message;
     try {
       localStorage.setItem(
         chatStorageKey,
         JSON.stringify({
-          chats,
-          previousInteractionId,
-          activeModel,
-          draftMessage:
-            message,
+          chats: chatsRef.current,
+          previousInteractionId: conversationRef.current.previousInteractionId,
+          activeModel: conversationRef.current.activeModel,
+          draftMessage: message,
           updatedAt:
             new Date().toISOString(),
         })
@@ -1440,7 +1471,8 @@ function Assistant() {
       return (
         message.trim().length >
           0 &&
-        !sending
+        !sending &&
+        chatStorageReady
       );
     }, [
       message,
@@ -1515,32 +1547,21 @@ function Assistant() {
     sending,
   ]);
 
-  const appendMessage = (
-    sender,
-    text
-  ) => {
-    setChats(
-      (
-        previousChats
-      ) => [
-        ...previousChats,
-        {
-          id:
-            typeof crypto !==
-              "undefined" &&
-            crypto.randomUUID
-              ? crypto.randomUUID()
-              : `${Date.now()}-${Math.random()}`,
-
-          sender,
-
-          text,
-
-          createdAt:
-            new Date().toISOString(),
-        },
-      ]
-    );
+  const appendMessage = (sender, text) => {
+    const nextChats = [
+      ...chatsRef.current,
+      {
+        id: typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random()}`,
+        sender,
+        text,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    chatsRef.current = nextChats;
+    setChats(nextChats);
+    persistConversation();
   };
 
   /*
@@ -1579,6 +1600,8 @@ function Assistant() {
       );
 
       setMessage("");
+      conversationRef.current.draftMessage = "";
+      persistConversation();
       setSending(true);
 
       try {
@@ -1599,7 +1622,7 @@ function Assistant() {
             message:
               outgoingMessage,
 
-            previousInteractionId,
+            previousInteractionId: conversationRef.current.previousInteractionId,
           });
 
         appendMessage(
@@ -1607,15 +1630,14 @@ function Assistant() {
           result.reply
         );
 
-        setPreviousInteractionId(
-          result.interactionId ||
-            previousInteractionId
-        );
+        const nextInteractionId = result.interactionId || conversationRef.current.previousInteractionId;
+        conversationRef.current.previousInteractionId = nextInteractionId;
+        setPreviousInteractionId(nextInteractionId);
 
-        setActiveModel(
-          result.model ||
-            activeModel
-        );
+        const nextModel = result.model || conversationRef.current.activeModel;
+        conversationRef.current.activeModel = nextModel;
+        setActiveModel(nextModel);
+        persistConversation();
       } catch (error) {
         console.error(
           "SmartClear AI error:",
@@ -1729,9 +1751,11 @@ function Assistant() {
         }
       }
 
-      setChats([
-        createFreshInitialMessage(),
-      ]);
+      const freshChats = [createFreshInitialMessage()];
+      chatsRef.current = freshChats;
+      conversationRef.current = { previousInteractionId: null, activeModel: null, draftMessage: "" };
+      setChats(freshChats);
+      persistConversation();
 
       setPreviousInteractionId(
         null

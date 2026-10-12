@@ -31,6 +31,7 @@ import {
   getOfficeReviewedStudents,
   getOfficeRequirements,
   getOfficeBatches,
+  getOfficeNewBatchNeeded,
 } from "../../services/officeStaffService";
 
 function OfficeDashboard() {
@@ -42,6 +43,8 @@ function OfficeDashboard() {
   const [reviewedStudents, setReviewedStudents] = useState([]);
   const [requirements, setRequirements] = useState([]);
   const [batches, setBatches] = useState([]);
+  const [newBatchNeeded, setNewBatchNeeded] = useState({ count: 0, byOffice: [] });
+  const [batchAlertError, setBatchAlertError] = useState("");
 
   const loadDashboard = async () => {
     try {
@@ -61,6 +64,17 @@ function OfficeDashboard() {
         getOfficeRequirements(),
         getOfficeBatches(),
       ]);
+
+      // Keep the dashboard available even if the new indicator query fails.
+      try {
+        const waitingData = await getOfficeNewBatchNeeded();
+        setNewBatchNeeded(waitingData || { count: 0, byOffice: [] });
+        setBatchAlertError("");
+      } catch (waitingError) {
+        console.error("Failed to load new-batch indicator:", waitingError);
+        setBatchAlertError("Unable to load the new batch indicator.");
+        setNewBatchNeeded({ count: 0, byOffice: [] });
+      }
 
       setContext(contextData || null);
 
@@ -493,6 +507,41 @@ function OfficeDashboard() {
             </div>
           </div>
         </section>
+
+        {(newBatchNeeded.count > 0 || batchAlertError) && (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <FaExclamationCircle className="mt-0.5 shrink-0 text-xl text-amber-600 dark:text-amber-400" />
+                <div>
+                  <h2 className="text-base font-black text-amber-950 dark:text-amber-200">
+                    {batchAlertError ? "Batch Indicator Unavailable" : "New Batch Needed"}
+                  </h2>
+                  {batchAlertError ? (
+                    <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">{batchAlertError}</p>
+                  ) : (
+                    <>
+                      <p className="mt-1 text-sm font-medium text-amber-900 dark:text-amber-200">
+                        {newBatchNeeded.count} student{newBatchNeeded.count === 1 ? "" : "s"} missed the submission schedule and {newBatchNeeded.count === 1 ? "is" : "are"} awaiting a new batch.
+                      </p>
+                      {(newBatchNeeded.byOffice || []).filter((item) => item.count > 0).map((item) => (
+                        <p key={item.officeId} className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                          {item.officeName}: {item.count} waiting
+                        </p>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </div>
+              <Link
+                to="/office/schedule"
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-amber-700"
+              >
+                <FaPlus /> Create New Batch
+              </Link>
+            </div>
+          </section>
+        )}
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {stats.map((stat) => {

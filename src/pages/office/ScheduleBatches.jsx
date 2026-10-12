@@ -24,6 +24,7 @@ import {
 import Swal from "sweetalert2";
 
 import OfficeStaffLayout from "../../layouts/OfficeStaffLayout";
+import { supabase } from "../../services/supabase";
 
 import {
   assignOfficeStudentsToBatch,
@@ -68,6 +69,8 @@ function ScheduleBatches() {
 
   const [savingBatch, setSavingBatch] =
     useState(false);
+
+  const [deletingBatchId, setDeletingBatchId] = useState(null);
 
   const [
     showStudentsModal,
@@ -117,6 +120,7 @@ function ScheduleBatches() {
   const emptyForm = {
     name: "",
     date: "",
+    endDate: "",
     startTime: "",
     endTime: "",
     note: "",
@@ -194,6 +198,18 @@ function ScheduleBatches() {
     return "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300";
   };
 
+  // Display-only schedule status (Asia/Manila). Does not modify database status.
+  const getScheduleState = (batch) => {
+    if (!batch?.date || !batch?.startTime || !batch?.endTime) return "Unscheduled";
+    if (["Cancelled", "Completed"].includes(batch.status)) return batch.status;
+    const start = new Date(`${batch.date}T${batch.startTime}+08:00`);
+    const end = new Date(`${batch.endDate || batch.date}T${batch.endTime}+08:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "Unscheduled";
+    if (Date.now() > end.getTime()) return "Expired";
+    if (batch.status === "Closed") return "Closed";
+    return Date.now() < start.getTime() ? "Upcoming" : "In Progress";
+  };
+
   const getStudentStatusClass = (
     status
   ) => {
@@ -222,6 +238,9 @@ function ScheduleBatches() {
       batch.scheduleDate ||
       batch.schedule_date ||
       "",
+
+    endDate:
+      batch.endDate || batch.end_date || batch.date || batch.schedule_date || "",
 
     startTime:
       String(
@@ -426,6 +445,7 @@ function ScheduleBatches() {
     setFormData({
       name: batch.name,
       date: batch.date,
+      endDate: batch.endDate || batch.date,
       startTime: batch.startTime,
       endTime: batch.endTime,
       note: batch.note || "",
@@ -454,6 +474,7 @@ function ScheduleBatches() {
 
     setFormData((current) => ({
       ...current,
+      ...(name === "date" && (!current.endDate || current.endDate < value) ? { endDate: value } : {}),
 
       [name]:
         name === "capacity"
@@ -470,13 +491,14 @@ function ScheduleBatches() {
     if (
       !formData.name.trim() ||
       !formData.date ||
+      !formData.endDate ||
       !formData.startTime ||
       !formData.endTime
     ) {
       await Swal.fire({
         icon: "warning",
         title: "Incomplete batch",
-        text: "Please complete the batch name, date, start time, and end time.",
+        text: "Please complete the batch name, start/end dates, and start/end times.",
         confirmButtonColor:
           "#2563eb",
       });
@@ -485,13 +507,13 @@ function ScheduleBatches() {
     }
 
     if (
-      formData.endTime <=
-      formData.startTime
+      formData.endDate < formData.date ||
+      (formData.endDate === formData.date && formData.endTime <= formData.startTime)
     ) {
       await Swal.fire({
         icon: "warning",
         title: "Invalid time",
-        text: "End time must be later than the start time.",
+        text: "End date/time must be later than the start date/time.",
         confirmButtonColor:
           "#2563eb",
       });
@@ -545,6 +567,9 @@ function ScheduleBatches() {
           scheduleDate:
             formData.date,
 
+          endDate:
+            formData.endDate,
+
           startTime:
             formData.startTime,
 
@@ -572,6 +597,9 @@ function ScheduleBatches() {
 
           scheduleDate:
             formData.date,
+
+          endDate:
+            formData.endDate,
 
           startTime:
             formData.startTime,
@@ -630,6 +658,68 @@ function ScheduleBatches() {
       });
     } finally {
       setSavingBatch(false);
+    }
+  };
+
+  // =========================================================
+  // SAFE DELETE: the database RPC MUST recheck ownership,
+  // Closed status and zero assignments before deleting.
+  // =========================================================
+
+  const handleSafeDeleteBatch = async (batch) => {
+    if (!batch?.id || deletingBatchId) return;
+
+    if (batch.status !== "Closed" || Number(batch.assigned) !== 0) {
+      await Swal.fire({
+        icon: "warning",
+        title: "Batch cannot be deleted",
+        text: "Only Closed batches with zero assigned students are eligible for deletion.",
+        confirmButtonColor: "#2563eb",
+      });
+      return;
+    }
+
+    const confirmation = await Swal.fire({
+      icon: "warning",
+      title: "Permanently delete this batch?",
+      html: `<p><strong>${batch.name.replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}</strong></p><p class="mt-2">Only the empty batch schedule will be deleted. Student clearance records must remain intact.</p>`,
+      showCancelButton: true,
+      confirmButtonText: "Yes, Delete Batch",
+      cancelButtonText: "Cancel",
+      confirmButtonColor: "#dc2626",
+      reverseButtons: true,
+    });
+    if (!confirmation.isConfirmed) return;
+
+    try {
+      setDeletingBatchId(batch.id);
+      // RPC is the authoritative safety check; never use direct table deletion.
+      const { data, error: deleteError } = await supabase.rpc(
+        "safe_delete_office_batch",
+        { p_batch_id: batch.id }
+      );
+      if (deleteError) throw deleteError;
+      if (data === false || data?.success === false) {
+        throw new Error(data?.message || "Database refused to delete this batch.");
+      }
+      await loadBatches({ silent: true });
+      await Swal.fire({
+        icon: "success",
+        title: "Batch deleted",
+        text: "The empty batch was safely deleted.",
+        timer: 1800,
+        showConfirmButton: false,
+      });
+    } catch (deleteError) {
+      console.error("Safe batch deletion failed:", deleteError);
+      await Swal.fire({
+        icon: "error",
+        title: "Unable to delete batch",
+        text: deleteError?.message || "The database did not permit this deletion.",
+        confirmButtonColor: "#2563eb",
+      });
+    } finally {
+      setDeletingBatchId(null);
     }
   };
 
@@ -1080,7 +1170,7 @@ function ScheduleBatches() {
 
   return (
     <OfficeStaffLayout>
-      <div className="mx-auto w-full max-w-[1600px] space-y-6">
+      <div className="mx-auto w-full max-w-[1600px] space-y-6 pt-8 lg:pt-12">
         {/* ===================================================
             HEADER
         =================================================== */}
@@ -1353,6 +1443,9 @@ function ScheduleBatches() {
                                 office.name
                               }
                             </span>
+                            <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${getScheduleState(batch) === "Expired" ? "bg-red-100 text-red-700" : getScheduleState(batch) === "In Progress" ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-600"}`}>
+                              Schedule: {getScheduleState(batch)}
+                            </span>
                           </div>
 
                           <h2 className="mt-3 text-lg font-black text-slate-950 dark:text-white">
@@ -1363,9 +1456,7 @@ function ScheduleBatches() {
                             <span className="flex items-center gap-2">
                               <FaCalendarAlt />
 
-                              {formatDate(
-                                batch.date
-                              )}
+                              {formatDate(batch.date)}{batch.endDate && batch.endDate !== batch.date ? ` – ${formatDate(batch.endDate)}` : ""}
                             </span>
 
                             <span className="flex items-center gap-2">
@@ -1423,6 +1514,27 @@ function ScheduleBatches() {
                           >
                             <FaEdit />
                             Manage Batch
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleSafeDeleteBatch(batch)}
+                            disabled={Boolean(deletingBatchId)}
+                            title={
+                              batch.status !== "Closed"
+                                ? "Safe Delete requires a Closed batch"
+                                : Number(batch.assigned) !== 0
+                                  ? `Safe Delete requires zero assigned students (${batch.assigned} remaining)`
+                                  : "Safely delete this empty, closed batch"
+                            }
+                            className={`inline-flex items-center justify-center gap-2 rounded-xl border px-3.5 py-2.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                              batch.status === "Closed" && Number(batch.assigned) === 0
+                                ? "border-red-200 text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
+                                : "border-slate-200 text-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-500 dark:hover:bg-slate-800"
+                            }`}
+                          >
+                            {deletingBatchId === batch.id ? <FaRedo className="animate-spin" /> : <FaTrashAlt />}
+                            {deletingBatchId === batch.id ? "Deleting..." : "Safe Delete"}
                           </button>
 
                           <button
@@ -1532,7 +1644,7 @@ function ScheduleBatches() {
                 </Field>
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Schedule Date">
+                  <Field label="Start Date">
                     <input
                       type="date"
                       name="date"
@@ -1543,6 +1655,20 @@ function ScheduleBatches() {
                     />
                   </Field>
 
+                  <Field label="End Date">
+                    <input
+                      type="date"
+                      name="endDate"
+                      min={formData.date || undefined}
+                      value={formData.endDate}
+                      onChange={handleChange}
+                      disabled={savingBatch}
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Maximum Students">
                     <input
                       type="number"
@@ -1728,9 +1854,7 @@ function ScheduleBatches() {
                       <span className="flex items-center gap-1.5">
                         <FaCalendarAlt />
 
-                        {formatDate(
-                          selectedBatch.date
-                        )}
+                        {formatDate(selectedBatch.date)}{selectedBatch.endDate && selectedBatch.endDate !== selectedBatch.date ? ` – ${formatDate(selectedBatch.endDate)}` : ""}
                       </span>
 
                       <span className="flex items-center gap-1.5">

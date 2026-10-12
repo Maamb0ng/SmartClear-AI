@@ -28,6 +28,7 @@ import {
   FaBookOpen,
   FaBuilding,
   FaCheckCircle,
+  FaChevronDown,
   FaClipboardList,
   FaCog,
   FaEdit,
@@ -510,6 +511,297 @@ function ResponsibilityCard({
   );
 }
 
+/*
+|--------------------------------------------------------------------------
+| ORGANIZED OFFICE DIRECTORY (Course → Year → Block)
+|--------------------------------------------------------------------------
+*/
+
+const getBlockStats = (block) => {
+  const items = block.targets.flatMap((target) => target.items);
+
+  return {
+    studentCount: new Set(
+      items.map((item) => item.student?.id).filter(Boolean)
+    ).size,
+    pendingCount: items.filter((item) => item.status === "Pending")
+      .length,
+  };
+};
+
+function OfficeDirectoryTree({
+  courseOptions,
+  yearOptions,
+  activeCourse,
+  activeYear,
+  onCourseChange,
+  onYearChange,
+  tree,
+  selectedBlockKey,
+  onSelectBlock,
+  pinnedBlocks,
+  hiddenBlocks,
+  onTogglePin,
+  onToggleHide,
+  collapsedCourses,
+  onToggleCollapse,
+}) {
+  const hasFilter = activeCourse !== "All" || activeYear !== "All";
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">
+            Filter groups
+          </p>
+
+          {hasFilter && (
+            <button
+              type="button"
+              onClick={() => {
+                onCourseChange("All");
+                onYearChange("All");
+              }}
+              className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-black text-slate-600 transition hover:bg-slate-100"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+
+        {courseOptions.length > 1 && (
+          <div>
+            <label
+              htmlFor="officeDirectoryCourse"
+              className="mb-1.5 block text-xs font-bold text-slate-600"
+            >
+              Course
+            </label>
+
+            <select
+              id="officeDirectoryCourse"
+              value={activeCourse}
+              onChange={(event) => onCourseChange(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-50"
+            >
+              <option value="All">
+                All courses ({courseOptions.length})
+              </option>
+              {courseOptions.map((course) => (
+                <option key={course.code} value={course.code}>
+                  {course.code}
+                  {course.name ? ` — ${course.name}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div>
+          <p className="mb-1.5 text-xs font-bold text-slate-600">
+            Year level
+          </p>
+
+          <div className="flex flex-wrap gap-1.5">
+            {["All", ...yearOptions].map((year) => {
+              const isActive = activeYear === year;
+
+              return (
+                <button
+                  key={year}
+                  type="button"
+                  onClick={() => onYearChange(year)}
+                  aria-pressed={isActive}
+                  className={`rounded-full px-3 py-1.5 text-xs font-black transition ${
+                    isActive
+                      ? "bg-blue-700 text-white shadow-sm"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {year === "All" ? "All years" : year}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Tree */}
+      {tree.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-7 text-center">
+          <FaUsers className="mx-auto text-3xl text-slate-300" />
+          <p className="mt-3 text-base font-semibold text-slate-700">
+            No office queue assigned
+          </p>
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            Check the filters, search, archived items, or administrator assignments.
+          </p>
+        </div>
+      ) : (
+        tree.map((course) => {
+          const isCollapsed = collapsedCourses.includes(course.code);
+
+          return (
+            <section
+              key={course.code}
+              className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+            >
+              <button
+                type="button"
+                onClick={() => onToggleCollapse(course.code)}
+                aria-expanded={!isCollapsed}
+                className="flex w-full items-center justify-between gap-3 bg-slate-100/80 px-4 py-3 text-left transition hover:bg-slate-100"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-black text-slate-900">
+                    {course.code}
+                  </p>
+                  <p className="mt-0.5 truncate text-xs text-slate-500">
+                    {course.name ||
+                      `${course.blockCount} block${
+                        course.blockCount === 1 ? "" : "s"
+                      }`}
+                  </p>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-2">
+                  {course.pendingCount > 0 ? (
+                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-black text-amber-800">
+                      {course.pendingCount} pending
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+                      All clear
+                    </span>
+                  )}
+
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-black text-slate-600 ring-1 ring-slate-200">
+                    {course.blockCount}
+                  </span>
+
+                  <FaChevronDown
+                    className={`text-xs text-slate-400 transition-transform ${
+                      isCollapsed ? "-rotate-90" : ""
+                    }`}
+                  />
+                </div>
+              </button>
+
+              {!isCollapsed && (
+                <div className="space-y-4 p-3">
+                  {course.years.map((year) => (
+                    <div key={year.label}>
+                      <div className="mb-2 flex items-center gap-2 px-1">
+                        <span className="text-[11px] font-black uppercase tracking-[0.14em] text-blue-700">
+                          {year.label}
+                        </span>
+                        <span className="h-px flex-1 bg-slate-200" />
+                        <span className="text-[11px] font-bold text-slate-400">
+                          {year.blocks.length} block
+                          {year.blocks.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {year.blocks.map((block) => {
+                          const isSelected = selectedBlockKey === block.key;
+                          const isPinned = pinnedBlocks.includes(block.key);
+                          const isHidden = hiddenBlocks.includes(block.key);
+                          const { studentCount, pendingCount } =
+                            getBlockStats(block);
+
+                          return (
+                            <div key={block.key} className="group relative">
+                              <button
+                                type="button"
+                                onClick={() => onSelectBlock(block.key)}
+                                aria-pressed={isSelected}
+                                className={`relative w-full overflow-hidden rounded-xl border px-3.5 py-3 text-left transition ${
+                                  isSelected
+                                    ? "border-blue-300 bg-blue-50/60 shadow-sm"
+                                    : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50"
+                                }`}
+                              >
+                                {isSelected && (
+                                  <span className="absolute inset-y-2 left-0 w-1 rounded-r-full bg-blue-600" />
+                                )}
+
+                                <div className="flex items-center justify-between gap-3 pl-1">
+                                  <div className="min-w-0">
+                                    <p className="flex items-center gap-1.5 truncate text-sm font-bold text-slate-900">
+                                      {formatBlockLabel(block.blockCode)}
+                                      {isPinned && (
+                                        <FaThumbtack className="shrink-0 text-[10px] text-blue-600" />
+                                      )}
+                                    </p>
+                                    <p className="mt-0.5 truncate text-xs text-slate-500">
+                                      {block.semester} · {block.schoolYear}
+                                    </p>
+                                  </div>
+
+                                  <div className="shrink-0 text-right">
+                                    <p className="text-xs font-semibold text-slate-600">
+                                      {studentCount} student
+                                      {studentCount === 1 ? "" : "s"}
+                                    </p>
+
+                                    {pendingCount > 0 ? (
+                                      <p className="mt-0.5 inline-flex items-center gap-1 text-xs font-bold text-amber-700">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                        {pendingCount} pending
+                                      </p>
+                                    ) : (
+                                      <p className="mt-0.5 text-xs font-semibold text-emerald-700">
+                                        All reviewed
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </button>
+
+                              <div className="absolute -top-2 right-2 flex gap-1 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    onTogglePin(block.key);
+                                  }}
+                                  title={isPinned ? "Unpin" : "Pin"}
+                                  className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-xs text-slate-500 shadow-sm transition hover:text-blue-700"
+                                >
+                                  <FaThumbtack />
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    onToggleHide(block.key);
+                                  }}
+                                  title={isHidden ? "Restore" : "Archive"}
+                                  className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-xs text-slate-500 shadow-sm transition hover:text-slate-900"
+                                >
+                                  {isHidden ? <FaEye /> : <FaEyeSlash />}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
 function ApproverDashboard() {
   const location =
     useLocation();
@@ -543,6 +835,15 @@ function ApproverDashboard() {
 
   const [showHiddenBlocks, setShowHiddenBlocks] =
     useState(false);
+
+  const [officeCourseFilter, setOfficeCourseFilter] =
+    useState("All");
+
+  const [officeYearFilter, setOfficeYearFilter] =
+    useState("All");
+
+  const [collapsedCourses, setCollapsedCourses] =
+    useState([]);
 
   const [pinnedBlocks, setPinnedBlocks] = useState([]);
   const [hiddenBlocks, setHiddenBlocks] = useState([]);
@@ -1953,26 +2254,27 @@ function ApproverDashboard() {
   }, [assignedSteps]);
 
   const workflowSummary = useMemo(() => {
+    const facultySteps = assignedSteps.filter((step) => step.category !== "office");
     const uniqueStudents = new Set(
-      assignedSteps
+      facultySteps
         .map((step) => step.student?.id)
         .filter(Boolean)
     );
 
     return {
       students: uniqueStudents.size,
-      forReview: assignedSteps.filter(
+      forReview: facultySteps.filter(
         (step) =>
           step.status === "Pending" && Boolean(step.submission)
       ).length,
-      waiting: assignedSteps.filter(
+      waiting: facultySteps.filter(
         (step) =>
           step.status === "Pending" && !step.submission
       ).length,
-      approved: assignedSteps.filter(
+      approved: facultySteps.filter(
         (step) => step.status === "Approved"
       ).length,
-      rejected: assignedSteps.filter(
+      rejected: facultySteps.filter(
         (step) => step.status === "Rejected"
       ).length,
     };
@@ -2829,9 +3131,131 @@ function ApproverDashboard() {
     selectedDirectoryCourse,
   ]);
 
+  /*
+  |--------------------------------------------------------------------------
+  | OFFICE DIRECTORY: FILTERS + COURSE → YEAR → BLOCK TREE
+  |--------------------------------------------------------------------------
+  */
+
+  const officeDirectoryGroups = useMemo(
+    () =>
+      workspaceMode === "office"
+        ? visibleCourseYearGroups
+        : [],
+    [workspaceMode, visibleCourseYearGroups]
+  );
+
+  const officeCourseOptions = useMemo(() => {
+    const courseMap = new Map();
+
+    officeDirectoryGroups.forEach((group) => {
+      if (!courseMap.has(group.courseCode)) {
+        courseMap.set(group.courseCode, {
+          code: group.courseCode,
+          name: group.courseName,
+        });
+      }
+    });
+
+    return [...courseMap.values()];
+  }, [officeDirectoryGroups]);
+
+  const activeOfficeCourse = officeCourseOptions.some(
+    (course) => course.code === officeCourseFilter
+  )
+    ? officeCourseFilter
+    : "All";
+
+  const officeYearOptions = useMemo(
+    () =>
+      [
+        ...new Set(
+          officeDirectoryGroups
+            .filter(
+              (group) =>
+                activeOfficeCourse === "All" ||
+                group.courseCode === activeOfficeCourse
+            )
+            .map((group) => group.yearLevel)
+        ),
+      ].sort(
+        (first, second) =>
+          getYearSortValue(first) -
+            getYearSortValue(second) ||
+          first.localeCompare(second)
+      ),
+    [officeDirectoryGroups, activeOfficeCourse]
+  );
+
+  const activeOfficeYear = officeYearOptions.includes(
+    officeYearFilter
+  )
+    ? officeYearFilter
+    : "All";
+
+  const filteredOfficeGroups = useMemo(
+    () =>
+      officeDirectoryGroups.filter(
+        (group) =>
+          (activeOfficeCourse === "All" ||
+            group.courseCode === activeOfficeCourse) &&
+          (activeOfficeYear === "All" ||
+            group.yearLevel === activeOfficeYear)
+      ),
+    [
+      officeDirectoryGroups,
+      activeOfficeCourse,
+      activeOfficeYear,
+    ]
+  );
+
+  const officeCourseTree = useMemo(() => {
+    const courseMap = new Map();
+
+    filteredOfficeGroups.forEach((group) => {
+      if (!courseMap.has(group.courseCode)) {
+        courseMap.set(group.courseCode, {
+          code: group.courseCode,
+          name: group.courseName,
+          years: [],
+          blockCount: 0,
+          pendingCount: 0,
+        });
+      }
+
+      const course = courseMap.get(group.courseCode);
+
+      course.years.push({
+        label: group.yearLevel,
+        sortValue: group.yearSortValue,
+        blocks: group.blocks,
+      });
+
+      group.blocks.forEach((block) => {
+        course.blockCount += 1;
+        course.pendingCount += getBlockStats(block).pendingCount;
+      });
+    });
+
+    return [...courseMap.values()].map((course) => ({
+      ...course,
+      years: course.years.sort(
+        (first, second) =>
+          first.sortValue - second.sortValue
+      ),
+    }));
+  }, [filteredOfficeGroups]);
+
+  const toggleCollapsedCourse = (courseCode) =>
+    setCollapsedCourses((current) =>
+      current.includes(courseCode)
+        ? current.filter((code) => code !== courseCode)
+        : [...current, courseCode]
+    );
+
   const displayedDirectoryGroups = useMemo(() => {
     if (workspaceMode === "office") {
-      return visibleCourseYearGroups;
+      return filteredOfficeGroups;
     }
 
     return classDirectoryGroups.filter(
@@ -2843,7 +3267,7 @@ function ApproverDashboard() {
     );
   }, [
     workspaceMode,
-    visibleCourseYearGroups,
+    filteredOfficeGroups,
     classDirectoryGroups,
     selectedDirectoryYear,
     selectedDirectoryCourse,
@@ -2858,10 +3282,6 @@ function ApproverDashboard() {
   );
 
   useEffect(() => {
-    if (workspaceMode !== "class") {
-      return;
-    }
-
     if (
       displayedDirectoryBlocks.length === 0
     ) {
@@ -2966,42 +3386,9 @@ function ApproverDashboard() {
 
   const totalAttentionCount =
     classPendingCount +
-    officePendingCount +
     adviserPendingCount;
 
-  /*
-  |--------------------------------------------------------------------------
-  | AUTOMATICALLY OPEN THE CORRECT WORKSPACE
-  |--------------------------------------------------------------------------
-  |
-  | Office-only accounts such as the Treasurer should not land on an empty
-  | Assigned Classes screen. When the approver has office work but no teaching
-  | classes, the dashboard opens Office Clearances automatically.
-  |--------------------------------------------------------------------------
-  */
-
-  useEffect(() => {
-    if (
-      workspaceMode === "class" &&
-      classBlocks.length === 0 &&
-      officeBlocks.length > 0
-    ) {
-      setWorkspaceMode("office");
-      return;
-    }
-
-    if (
-      workspaceMode === "office" &&
-      officeBlocks.length === 0 &&
-      classBlocks.length > 0
-    ) {
-      setWorkspaceMode("class");
-    }
-  }, [
-    workspaceMode,
-    classBlocks.length,
-    officeBlocks.length,
-  ]);
+  // Office clearance is handled through the separate Assigned Office portal.
 
   /*
   |--------------------------------------------------------------------------
@@ -4239,12 +4626,12 @@ function ApproverDashboard() {
       }
     );
 
-    setWorkspaceMode(
-      matchedStep.category ===
-        "office"
-        ? "office"
-        : "class"
-    );
+    if (matchedStep.category === "office") {
+      navigate("/office/students");
+      return;
+    }
+
+    setWorkspaceMode("class");
 
     setSelectedBlockKey(
       matchedStep.blockKey
@@ -5704,7 +6091,7 @@ function ApproverDashboard() {
                 Clearance Review Center
               </h1>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-300">
-                Choose a class or office queue, select the exact clearance requirement, then review only the students that need your action.
+                Choose your assigned class, select the subject clearance requirement, and review students who need your action.
               </p>
             </div>
 
@@ -5764,10 +6151,10 @@ function ApproverDashboard() {
                 Faculty Dashboard
               </div>
               <h2 className="mt-2 text-xl font-black text-slate-900">
-                My Classes &amp; Responsibilities
+                My Classes &amp; Adviser Responsibilities
               </h2>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
-                Pili ug workspace. Ang imong teaching classes ug dugang nga clearance responsibilities gibulag aron klaro ang trabaho.
+                Manage your assigned subject clearances here. Office clearances are handled in the Assigned Office portal.
               </p>
             </div>
 
@@ -5811,15 +6198,14 @@ function ApproverDashboard() {
           </div>
 
           {classBlocks.length === 0 &&
-          adviserSections.length === 0 &&
-          officeResponsibilities.length === 0 ? (
+          adviserSections.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
               <FaUsers className="mx-auto text-3xl text-slate-300" />
               <p className="mt-3 font-bold text-slate-700">
                 Wala pay assignment
               </p>
               <p className="mt-1 text-sm text-slate-500">
-                Kontaka ang administrator para sa class, adviser, o office assignment.
+                No subject or adviser assignment yet. Use Assigned Office for office clearance tasks.
               </p>
             </div>
           ) : (
@@ -5893,90 +6279,6 @@ function ApproverDashboard() {
                 />
               )}
 
-              {/* Office responsibilities */}
-              {officeResponsibilities.map((assignment) => {
-                const officeName =
-                  assignment.offices?.office_name ||
-                  "Office Clearance";
-
-                const officeCode =
-                  assignment.offices?.office_code || "";
-
-                const summary =
-                  responsibilityStats.offices[
-                    assignment.id
-                  ] || {
-                    total: 0,
-                    pending: 0,
-                    students: 0,
-                    forReview: 0,
-                    progress: 0,
-                  };
-
-                const openQueue = () => {
-                  setWorkspaceMode("office");
-                  setSelectedBlockKey(null);
-                  setSelectedTargetKey(null);
-                };
-
-                return (
-                  <ResponsibilityCard
-                    key={assignment.id}
-                    theme="cyan"
-                    icon={<FaBuilding />}
-                    eyebrow={
-                      officeCode
-                        ? `Office • ${officeCode}`
-                        : "Office"
-                    }
-                    title={officeName}
-                    description="Dugang nga clearance responsibility nga gi-assign sa imong account."
-                    pending={summary.pending}
-                    active={workspaceMode === "office"}
-                    stats={[
-                      { label: "Students", value: summary.students },
-                      { label: "For review", value: summary.forReview },
-                      { label: "Total", value: summary.total },
-                    ]}
-                    progress={
-                      summary.total ? summary.progress : null
-                    }
-                    onClick={openQueue}
-                    footer={
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={openQueue}
-                          className="inline-flex flex-1 items-center justify-center rounded-xl bg-cyan-700 px-3 py-2 text-xs font-black text-white transition hover:bg-cyan-800"
-                        >
-                          Review Queue
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            navigate(
-                              "/approver/office-requirements",
-                              {
-                                state: {
-                                  officeId:
-                                    assignment.office_id,
-                                  officeName,
-                                  officeCode,
-                                },
-                              }
-                            )
-                          }
-                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-white px-3 py-2 text-xs font-black text-cyan-700 transition hover:bg-cyan-50"
-                        >
-                          <FaClipboardList />
-                          Requirements / Questions
-                        </button>
-                      </div>
-                    }
-                  />
-                );
-              })}
             </div>
           )}
 
@@ -6268,7 +6570,31 @@ function ApproverDashboard() {
             </div>
 
             <div className="max-h-[660px] overflow-y-auto p-4">
-              {displayedDirectoryGroups.length === 0 ? (
+              {workspaceMode === "office" ? (
+                <OfficeDirectoryTree
+                  courseOptions={officeCourseOptions}
+                  yearOptions={officeYearOptions}
+                  activeCourse={activeOfficeCourse}
+                  activeYear={activeOfficeYear}
+                  onCourseChange={(value) => {
+                    setOfficeCourseFilter(value);
+                    setOfficeYearFilter("All");
+                  }}
+                  onYearChange={setOfficeYearFilter}
+                  tree={officeCourseTree}
+                  selectedBlockKey={selectedBlockKey}
+                  onSelectBlock={(key) => {
+                    setSelectedBlockKey(key);
+                    setSelectedTargetKey(null);
+                  }}
+                  pinnedBlocks={pinnedBlocks}
+                  hiddenBlocks={hiddenBlocks}
+                  onTogglePin={togglePinnedBlock}
+                  onToggleHide={toggleHiddenBlock}
+                  collapsedCourses={collapsedCourses}
+                  onToggleCollapse={toggleCollapsedCourse}
+                />
+              ) : displayedDirectoryGroups.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 bg-white p-7 text-center">
                   <FaUsers className="mx-auto text-3xl text-slate-300" />
 

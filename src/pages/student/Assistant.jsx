@@ -445,10 +445,13 @@ function Assistant() {
   const chatsRef = useRef(chats);
   const conversationRef = useRef({ previousInteractionId: null, activeModel: null, draftMessage: "" });
   const storageKeyRef = useRef(null);
+  const activeUserIdRef = useRef(null);
+  const sessionVersionRef = useRef(0);
+  const chatStorageReadyRef = useRef(false);
 
   const persistConversation = useCallback((overrides = {}) => {
     const key = storageKeyRef.current;
-    if (!key) return;
+    if (!key || !chatStorageReadyRef.current || !activeUserIdRef.current) return;
     try {
       const current = { ...conversationRef.current, ...overrides };
       localStorage.setItem(key, JSON.stringify({
@@ -485,6 +488,7 @@ function Assistant() {
     useCallback(async ({
       showSuccess = false,
     } = {}) => {
+      const contextSessionVersion = sessionVersionRef.current;
       setContextLoading(true);
       setContextError("");
 
@@ -1164,6 +1168,8 @@ function Assistant() {
             ),
         };
 
+        if (contextSessionVersion !== sessionVersionRef.current) return null;
+
         setStudentContext(
           context
         );
@@ -1192,6 +1198,8 @@ function Assistant() {
           error
         );
 
+        if (contextSessionVersion !== sessionVersionRef.current) return null;
+
         setContextError(
           error?.message ||
             "Unable to load your current clearance information."
@@ -1199,7 +1207,7 @@ function Assistant() {
 
         return null;
       } finally {
-        setContextLoading(
+        if (contextSessionVersion === sessionVersionRef.current) setContextLoading(
           false
         );
       }
@@ -1214,125 +1222,105 @@ function Assistant() {
   useEffect(() => {
     let isMounted = true;
 
-    const initializeAssistant =
-      async () => {
+    // Restore only the currently authenticated student's own local chat.
+    // This also runs when Supabase reports a different signed-in account.
+    const restoreForUser = (user) => {
+      if (!isMounted) return;
+
+      const userId = user?.id || null;
+      if (activeUserIdRef.current === userId && chatStorageReadyRef.current) {
+        return;
+      }
+
+      sessionVersionRef.current += 1;
+      activeUserIdRef.current = userId;
+      chatStorageReadyRef.current = false;
+      storageKeyRef.current = null;
+      setChatStorageReady(false);
+      setChatStorageKey(null);
+      setStudentContext(null);
+      setContextError("");
+      setContextLoading(Boolean(userId));
+      setSending(false);
+
+      let restoredChats = [createFreshInitialMessage()];
+      let restoredInteractionId = null;
+      let restoredModel = null;
+      let restoredDraft = "";
+      let storageKey = null;
+
+      if (userId) {
+        storageKey = `${CHAT_STORAGE_PREFIX}:${userId}`;
         try {
-          const {
-            data: { user },
-            error,
-          } =
-            await supabase.auth.getUser();
-
-          if (error) {
-            throw error;
-          }
-
-          if (
-            !user ||
-            !isMounted
-          ) {
-            return;
-          }
-
-          const storageKey =
-            `${CHAT_STORAGE_PREFIX}:${user.id}`;
-
-          storageKeyRef.current = storageKey;
-          setChatStorageKey(
-            storageKey
-          );
-
-          const storedValue =
-            localStorage.getItem(
-              storageKey
-            );
-
+          const storedValue = localStorage.getItem(storageKey);
           if (storedValue) {
-            const storedConversation =
-              JSON.parse(
-                storedValue
-              );
-
-            const storedChats =
-              Array.isArray(
-                storedConversation?.chats
-              )
-                ? storedConversation.chats.filter(
-                    isValidStoredChat
-                  )
-                : [];
-
-            if (
-              storedChats.length >
-              0
-            ) {
-              chatsRef.current = storedChats;
-              setChats(
-                storedChats
-              );
-            }
-
-            conversationRef.current.previousInteractionId =
+            const storedConversation = JSON.parse(storedValue);
+            const validChats = Array.isArray(storedConversation?.chats)
+              ? storedConversation.chats.filter(isValidStoredChat)
+              : [];
+            if (validChats.length) restoredChats = validChats;
+            restoredInteractionId =
               typeof storedConversation?.previousInteractionId === "string"
                 ? storedConversation.previousInteractionId : null;
-            conversationRef.current.activeModel =
+            restoredModel =
               typeof storedConversation?.activeModel === "string"
                 ? storedConversation.activeModel : null;
-            conversationRef.current.draftMessage =
+            restoredDraft =
               typeof storedConversation?.draftMessage === "string"
                 ? storedConversation.draftMessage : "";
-
-            setPreviousInteractionId(
-              typeof storedConversation
-                ?.previousInteractionId ===
-                "string"
-                ? storedConversation
-                    .previousInteractionId
-                : null
-            );
-
-            setActiveModel(
-              typeof storedConversation
-                ?.activeModel ===
-                "string"
-                ? storedConversation
-                    .activeModel
-                : null
-            );
-
-            setMessage(
-              typeof storedConversation
-                ?.draftMessage ===
-                "string"
-                ? storedConversation
-                    .draftMessage
-                : ""
-            );
           }
         } catch (error) {
-          console.error(
-            "Unable to restore AI conversation:",
-            error
-          );
-        } finally {
-          if (isMounted) {
-            setChatStorageReady(
-              true
-            );
-          }
+          console.error("Unable to restore AI conversation:", error);
         }
+      }
 
-        await loadStudentContext();
+      chatsRef.current = restoredChats;
+      conversationRef.current = {
+        previousInteractionId: restoredInteractionId,
+        activeModel: restoredModel,
+        draftMessage: restoredDraft,
       };
+      setChats(restoredChats);
+      setPreviousInteractionId(restoredInteractionId);
+      setActiveModel(restoredModel);
+      setMessage(restoredDraft);
+      storageKeyRef.current = storageKey;
+      setChatStorageKey(storageKey);
+      chatStorageReadyRef.current = Boolean(userId);
+      setChatStorageReady(Boolean(userId));
 
-    initializeAssistant();
+      if (userId) loadStudentContext();
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === "SIGNED_IN" || event === "SIGNED_OUT" ||
+            event === "INITIAL_SESSION" || event === "USER_DELETED") {
+          restoreForUser(session?.user || null);
+        }
+      }
+    );
+
+    // The auth event usually supplies the initial session. This fallback
+    // also handles environments where INITIAL_SESSION is not emitted.
+    supabase.auth.getUser().then(({ data, error }) => {
+      if (!isMounted) return;
+      if (error) {
+        console.error("Unable to initialize AI assistant:", error);
+        return;
+      }
+      if (!chatStorageReadyRef.current && data?.user) {
+        restoreForUser(data.user);
+      }
+    }).catch((error) => {
+      console.error("Unable to initialize AI assistant:", error);
+    });
 
     return () => {
       isMounted = false;
+      subscription.unsubscribe();
     };
-  }, [
-    loadStudentContext,
-  ]);
+  }, [loadStudentContext]);
 
   /*
   |--------------------------------------------------------------------------
@@ -1343,7 +1331,9 @@ function Assistant() {
   useEffect(() => {
     if (
       !chatStorageReady ||
-      !chatStorageKey
+      !chatStorageKey ||
+      chatStorageKey !== storageKeyRef.current ||
+      !chatStorageReadyRef.current
     ) {
       return;
     }
@@ -1589,10 +1579,14 @@ function Assistant() {
 
       if (
         !outgoingMessage ||
-        sending
+        sending ||
+        !chatStorageReadyRef.current ||
+        !activeUserIdRef.current
       ) {
         return;
       }
+
+      const requestVersion = sessionVersionRef.current;
 
       appendMessage(
         "user",
@@ -1616,6 +1610,7 @@ function Assistant() {
         */
 
         await loadStudentContext();
+        if (requestVersion !== sessionVersionRef.current) return;
 
         const result =
           await sendGeminiMessage({
@@ -1624,6 +1619,8 @@ function Assistant() {
 
             previousInteractionId: conversationRef.current.previousInteractionId,
           });
+
+        if (requestVersion !== sessionVersionRef.current) return;
 
         appendMessage(
           "bot",
@@ -1639,6 +1636,7 @@ function Assistant() {
         setActiveModel(nextModel);
         persistConversation();
       } catch (error) {
+        if (requestVersion !== sessionVersionRef.current) return;
         console.error(
           "SmartClear AI error:",
           error
@@ -1664,7 +1662,7 @@ function Assistant() {
             "#2563eb",
         });
       } finally {
-        setSending(false);
+        if (requestVersion === sessionVersionRef.current) setSending(false);
 
         requestAnimationFrame(
           () => {

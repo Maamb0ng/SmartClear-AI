@@ -1,3 +1,4 @@
+
 import {
   NavLink,
   useNavigate,
@@ -13,6 +14,7 @@ import {
   FaCalendarAlt,
   FaCheckCircle,
   FaClipboardCheck,
+  FaGraduationCap,
   FaHome,
   FaSignOutAlt,
   FaUser,
@@ -40,6 +42,11 @@ function Sidebar() {
   ];
 
   const clearanceItems = [
+    {
+      name: "Ready to Enroll",
+      path: "/treasurer/ready-for-enrollment",
+      icon: <FaGraduationCap />,
+    },
     {
       name: "Reviewed Students",
       path: "/treasurer/reviewed",

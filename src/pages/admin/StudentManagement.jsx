@@ -103,6 +103,11 @@ function StudentManagement() {
   ] = useState([]);
 
   const [
+    activeTerm,
+    setActiveTerm,
+  ] = useState(null);
+
+  const [
     loading,
     setLoading,
   ] = useState(true);
@@ -177,6 +182,7 @@ function StudentManagement() {
           const [
             studentResult,
             sectionResult,
+            termResult,
           ] =
             await Promise.all([
               supabase
@@ -232,6 +238,13 @@ function StudentManagement() {
                   "is_active",
                   true
                 ),
+
+              supabase
+                .from("academic_terms")
+                .select("id, school_year, semester, status, is_active")
+                .eq("is_active", true)
+                .eq("status", "Active")
+                .limit(1),
             ]);
 
           if (
@@ -245,6 +258,12 @@ function StudentManagement() {
           ) {
             throw sectionResult.error;
           }
+
+          if (termResult.error) {
+            throw termResult.error;
+          }
+
+          setActiveTerm(termResult.data?.[0] || null);
 
           const formattedSections =
             (
@@ -357,6 +376,8 @@ function StudentManagement() {
           setSections(
             formattedSections
           );
+
+          setSelectedSectionId("");
 
           setSelectedStudent(
             (
@@ -580,9 +601,18 @@ function StudentManagement() {
       yearFilter,
     ]);
 
+  const currentTermSections = useMemo(() => {
+    if (!activeTerm) return [];
+
+    return sections.filter((sectionRecord) =>
+      sectionRecord.school_year === activeTerm.school_year &&
+      sectionRecord.semester === activeTerm.semester
+    );
+  }, [sections, activeTerm]);
+
   const selectedOfficialSection =
     useMemo(() => {
-      return sections.find(
+      return currentTermSections.find(
         (
           sectionRecord
         ) =>
@@ -590,7 +620,7 @@ function StudentManagement() {
           selectedSectionId
       );
     }, [
-      sections,
+      currentTermSections,
       selectedSectionId,
     ]);
 
@@ -628,7 +658,7 @@ function StudentManagement() {
         }
 
         const matches =
-          sections.filter(
+          currentTermSections.filter(
             (
               sectionRecord
             ) =>
@@ -670,7 +700,7 @@ function StudentManagement() {
           : null;
       },
       [
-        sections,
+        currentTermSections,
       ]
     );
 
@@ -697,7 +727,7 @@ function StudentManagement() {
   ) => {
     const matchedSection =
       student.section_id
-        ? sections.find(
+        ? currentTermSections.find(
             (
               sectionRecord
             ) =>
@@ -802,6 +832,39 @@ function StudentManagement() {
             "#2563eb",
         });
 
+        return;
+      }
+
+      // Revalidate the active term at save time to prevent stale assignments.
+      try {
+        const { data: latestTerm, error: termError } = await supabase
+          .from("academic_terms")
+          .select("id, school_year, semester, status")
+          .eq("is_active", true)
+          .eq("status", "Active")
+          .limit(1)
+          .maybeSingle();
+
+        if (termError) throw termError;
+        if (!latestTerm ||
+            latestTerm.id !== activeTerm?.id ||
+            latestTerm.school_year !== selectedOfficialSection.school_year ||
+            latestTerm.semester !== selectedOfficialSection.semester) {
+          await Swal.fire({
+            icon: "warning",
+            title: "Academic Term Changed",
+            text: "The selected section is not in the current active semester. Refresh this page before continuing.",
+            confirmButtonColor: "#2563eb",
+          });
+          return;
+        }
+      } catch (error) {
+        await Swal.fire({
+          icon: "error",
+          title: "Unable to Verify Academic Term",
+          text: error?.message || "Please try again.",
+          confirmButtonColor: "#2563eb",
+        });
         return;
       }
 
@@ -1731,14 +1794,21 @@ function StudentManagement() {
                           </div>
                         </div>
 
+                        <div className="mt-5 rounded-xl border border-blue-200 bg-white p-3 text-sm text-blue-800">
+                          {activeTerm
+                            ? `Current academic term: ${activeTerm.semester}, ${activeTerm.school_year}`
+                            : "No active academic term. Section assignment is unavailable."}
+                        </div>
+
                         <label className="mt-5 block">
                           <span className="mb-2 block text-sm font-bold text-slate-700">
                             Select Official Class
                           </span>
 
                           <select
+                            disabled={!activeTerm}
                             value={
-                              selectedSectionId
+                              selectedOfficialSection ? selectedSectionId : ""
                             }
                             onChange={(
                               event
@@ -1753,7 +1823,7 @@ function StudentManagement() {
                               Select course, year, block, semester, and school year
                             </option>
 
-                            {sections.map(
+                            {currentTermSections.map(
                               (
                                 sectionRecord
                               ) => (
@@ -1809,7 +1879,7 @@ function StudentManagement() {
                           </p>
                         )}
 
-                        {sections.length ===
+                        {currentTermSections.length ===
                           0 && (
                           <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                             No active official sections are available. Create

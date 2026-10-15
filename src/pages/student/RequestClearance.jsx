@@ -893,6 +893,7 @@ const getStepHint = (step) => {
 
 function RequestClearance() {
   const [student, setStudent] = useState(null);
+  const [activeTerm, setActiveTerm] = useState(null);
   const [clearanceRequest, setClearanceRequest] = useState(null);
   const [steps, setSteps] = useState([]);
   const [guidanceRescheduleRequests, setGuidanceRescheduleRequests] = useState([]);
@@ -1097,7 +1098,26 @@ function RequestClearance() {
 
       setStudent(studentData);
 
-      /* LOAD LATEST CLEARANCE REQUEST */
+      /* LOAD OFFICIAL ACTIVE ACADEMIC TERM */
+      const { data: activeTermData, error: termError } = await supabase
+        .from("academic_terms")
+        .select("id, school_year, semester, status, is_active")
+        .eq("is_active", true)
+        .eq("status", "Active")
+        .maybeSingle();
+
+      if (termError) throw termError;
+      setActiveTerm(activeTermData || null);
+
+      // Never show a previous semester's clearance as the current request.
+      if (!activeTermData) {
+        setClearanceRequest(null);
+        setSteps([]);
+        setClearancePass(null);
+        return;
+      }
+
+      /* LOAD CURRENT SEMESTER CLEARANCE REQUEST */
 
       const { data: requestData, error: requestError } = await supabase
         .from("clearance_requests")
@@ -1114,6 +1134,8 @@ function RequestClearance() {
           completed_at
         `)
         .eq("student_id", studentData.id)
+        .eq("semester", activeTermData.semester)
+        .eq("school_year", activeTermData.school_year)
         .order("requested_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -1124,6 +1146,7 @@ function RequestClearance() {
 
       if (!requestData) {
         setSteps([]);
+        setClearancePass(null);
         return;
       }
 
@@ -1777,8 +1800,8 @@ function RequestClearance() {
 
   const hasCurrentCycleRequest =
     clearanceRequest &&
-    clearanceRequest.school_year === student?.school_year &&
-    clearanceRequest.semester === student?.semester &&
+    clearanceRequest.school_year === activeTerm?.school_year &&
+    clearanceRequest.semester === activeTerm?.semester &&
     ["Pending", "In Progress", "Completed"].includes(clearanceRequest.status);
 
   /*
@@ -1818,6 +1841,27 @@ function RequestClearance() {
       return;
     }
 
+    if (!activeTerm) {
+      await Swal.fire({
+        icon: "warning",
+        title: "No Active Semester",
+        text: "Clearance requests are unavailable until the administrator opens an academic semester.",
+      });
+      return;
+    }
+
+    if (
+      student.school_year !== activeTerm.school_year ||
+      student.semester !== activeTerm.semester
+    ) {
+      await Swal.fire({
+        icon: "warning",
+        title: "Academic Assignment Mismatch",
+        text: `Your official student assignment (${student.semester || "Not assigned"}, ${student.school_year || "Not assigned"}) does not match the active semester (${activeTerm.semester}, ${activeTerm.school_year}). Please contact the administrator.`,
+      });
+      return;
+    }
+
     if (hasCurrentCycleRequest) {
       await Swal.fire({
         icon: "info",
@@ -1828,8 +1872,8 @@ function RequestClearance() {
       return;
     }
 
-    const schoolYear = student.school_year || "Official assigned school year";
-    const semester = student.semester || "Official assigned semester";
+    const schoolYear = activeTerm.school_year;
+    const semester = activeTerm.semester;
 
     const confirmation = await Swal.fire({
       icon: "question",
@@ -2224,6 +2268,23 @@ function RequestClearance() {
       return;
     }
 
+    // Office question answers already constitute the student's text submission.
+    // Keep the RPC's submission_text populated for backends that require text or a file.
+    const hasOfficeQuestions = isOfficeSubmission && officeItems.some(
+      (item) => String(item.requirement_type || "").toLowerCase() === "question"
+    );
+    const officeAnswerSummary = hasOfficeQuestions
+      ? officeItems
+          .filter((item) => String(item.requirement_type || "").toLowerCase() === "question")
+          .map((item) => {
+            const answer = String(normalizedOfficeAnswers[item.id] ?? "").trim();
+            return answer ? `${item.title}: ${answer}` : null;
+          })
+          .filter(Boolean)
+          .join("\n")
+      : "";
+    const effectiveSubmissionText = cleanText || officeAnswerSummary;
+
     const isResubmission = selectedStep.status === "Rejected";
 
     const confirmation = await Swal.fire({
@@ -2275,13 +2336,13 @@ function RequestClearance() {
         ? await supabase.rpc("submit_office_clearance_answers", {
             p_step_id: selectedStep.id,
             p_answers: normalizedOfficeAnswers,
-            p_submission_text: cleanText || null,
+            p_submission_text: effectiveSubmissionText || null,
             p_attachment_url: uploadedFilePath || null,
             p_attachment_name: selectedFile?.name || null,
           })
         : await supabase.rpc("submit_clearance_requirement", {
             p_step_id: selectedStep.id,
-            p_submission_text: cleanText || null,
+            p_submission_text: effectiveSubmissionText || null,
             p_attachment_url: uploadedFilePath || null,
             p_attachment_name: selectedFile?.name || null,
           });
@@ -3825,8 +3886,8 @@ function RequestClearance() {
     );
   }
 
-  const cycleSemester = clearanceRequest?.semester || student?.semester;
-  const cycleSchoolYear = clearanceRequest?.school_year || student?.school_year;
+  const cycleSemester = activeTerm?.semester || "No active semester";
+  const cycleSchoolYear = activeTerm?.school_year || null;
 
   return (
     <DashboardLayout>
@@ -3869,7 +3930,7 @@ function RequestClearance() {
               {refreshing ? "Refreshing..." : "Refresh"}
             </button>
 
-            {!hasCurrentCycleRequest && (
+            {!hasCurrentCycleRequest && activeTerm && (
               <button
                 type="button"
                 onClick={handleRequestClearance}
@@ -3937,14 +3998,15 @@ function RequestClearance() {
           </h2>
 
           <p className="mx-auto mt-2 max-w-xl text-slate-600">
-            Submit a clearance request to generate your official subject and
-            office requirements.
+            {activeTerm
+              ? "Submit a clearance request to generate your official subject and office requirements."
+              : "No academic semester is currently open for clearance requests. Please wait for the administrator to activate a semester."}
           </p>
 
           <button
             type="button"
             onClick={handleRequestClearance}
-            disabled={submittingRequest}
+            disabled={submittingRequest || !activeTerm}
             className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 font-semibold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:px-7"
           >
             <FaPaperPlane />
@@ -4485,7 +4547,9 @@ function RequestClearance() {
                   in the collapsed office card. */}
               {!selectedStep.subject_id &&
                 selectedStep.office_id &&
-                selectedStep.officeRequirements?.length > 0 && (
+                selectedStep.officeRequirements?.some(
+                  (item) => String(item.requirement_type || "").toLowerCase() !== "question"
+                ) && (
                   <section className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 sm:p-5">
                     <div className="flex items-start gap-3">
                       <FaClipboardCheck className="mt-1 shrink-0 text-indigo-700" />
@@ -4500,7 +4564,7 @@ function RequestClearance() {
                       </div>
                     </div>
                     <div className="mt-4 space-y-3">
-                      {selectedStep.officeRequirements.map((item, index) => {
+                      {selectedStep.officeRequirements.filter((item) => String(item.requirement_type || "").toLowerCase() !== "question").map((item, index) => {
                         const isQuestion =
                           String(item.requirement_type || "").toLowerCase() ===
                           "question";
@@ -4653,7 +4717,13 @@ function RequestClearance() {
                   </section>
                 )}
 
-              {stepAllowsText(selectedStep) && (
+              {stepAllowsText(selectedStep) && !(
+                selectedStep.office_id &&
+                !selectedStep.subject_id &&
+                (selectedStep.officeRequirements || []).some(
+                  (item) => String(item.requirement_type || "").toLowerCase() === "question"
+                )
+              ) && (
                 <div>
                   <label
                     htmlFor="submissionText"

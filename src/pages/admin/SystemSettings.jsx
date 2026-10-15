@@ -1,4 +1,6 @@
 import {
+  useCallback,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -10,9 +12,14 @@ import {
 import Swal from "sweetalert2";
 
 import AdminLayout from "../../layouts/AdminLayout";
+import { supabase } from "../../services/supabase";
 
 import {
   FaCalendarAlt,
+  FaLock,
+  FaPlusCircle,
+  FaHistory,
+  FaSpinner,
   FaCheckCircle,
   FaCog,
   FaEnvelope,
@@ -64,6 +71,110 @@ function SystemSettings() {
     saving,
     setSaving,
   ] = useState(false);
+
+  // Academic terms are stored in Supabase, independently of UI-only settings.
+  const [terms, setTerms] = useState([]);
+  const [termCounts, setTermCounts] = useState({});
+  const [termLoading, setTermLoading] = useState(true);
+  const [termBusy, setTermBusy] = useState(false);
+  const [termError, setTermError] = useState("");
+  const [nextYear, setNextYear] = useState("2026-2027");
+  const [nextSemester, setNextSemester] = useState("2nd Semester");
+
+  const loadAcademicTerms = useCallback(async () => {
+    setTermLoading(true);
+    setTermError("");
+    try {
+      const { data: termData, error: termsError } = await supabase
+        .from("academic_terms")
+        .select("id, school_year, semester, status, is_active, opened_at, closed_at")
+        .order("created_at", { ascending: false });
+      if (termsError) throw termsError;
+      const { data: requestData, error: requestsError } = await supabase
+        .from("clearance_requests")
+        .select("school_year, semester, status");
+      if (requestsError) throw requestsError;
+      const counts = {};
+      for (const request of requestData || []) {
+        const key = `${request.school_year}|${request.semester}`;
+        if (!counts[key]) counts[key] = { total: 0, completed: 0, unfinished: 0 };
+        counts[key].total += 1;
+        if (request.status === "Completed") counts[key].completed += 1;
+        else counts[key].unfinished += 1;
+      }
+      setTerms(termData || []);
+      setTermCounts(counts);
+    } catch (error) {
+      setTermError(error?.message || "Unable to load academic terms.");
+    } finally {
+      setTermLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAcademicTerms();
+  }, [loadAcademicTerms]);
+
+  const activeTerm = terms.find((term) => term.is_active && term.status === "Active");
+  const activeCounts = activeTerm
+    ? (termCounts[`${activeTerm.school_year}|${activeTerm.semester}`] || { total: 0, completed: 0, unfinished: 0 })
+    : { total: 0, completed: 0, unfinished: 0 };
+
+  const handleCloseTerm = async () => {
+    if (!activeTerm || termBusy || termLoading || activeCounts.unfinished > 0) return;
+    const confirmation = await Swal.fire({
+      icon: "warning",
+      title: "Close academic semester?",
+      html: `<p>This will archive <strong>${activeTerm.semester}, ${activeTerm.school_year}</strong>.</p><p>Clearance records will become read-only. This action cannot be undone using the Admin interface.</p>`,
+      showCancelButton: true,
+      confirmButtonText: "Close Semester",
+      confirmButtonColor: "#dc2626",
+    });
+    if (!confirmation.isConfirmed) return;
+    setTermBusy(true);
+    try {
+      const { error } = await supabase.rpc("close_academic_term", { p_term_id: activeTerm.id });
+      if (error) throw error;
+      await loadAcademicTerms();
+      await Swal.fire({ icon: "success", title: "Semester Closed", text: "The academic term is now archived." });
+    } catch (error) {
+      await Swal.fire({ icon: "error", title: "Unable to Close Semester", text: error?.message || "Please try again." });
+    } finally {
+      setTermBusy(false);
+    }
+  };
+
+  const handleOpenTerm = async () => {
+    if (activeTerm || termBusy || termLoading) return;
+    const year = nextYear.trim();
+    if (!/^\d{4}-\d{4}$/.test(year) || Number(year.slice(5)) !== Number(year.slice(0, 4)) + 1) {
+      await Swal.fire({ icon: "warning", title: "Invalid School Year", text: "Use a consecutive school year, e.g. 2026-2027." });
+      return;
+    }
+    const confirmation = await Swal.fire({
+      icon: "question",
+      title: "Open new academic semester?",
+      text: `Activate ${nextSemester}, ${year}? Confirm that sections, class offerings, and approvers are prepared for this term.`,
+      showCancelButton: true,
+      confirmButtonText: "Open Semester",
+      confirmButtonColor: "#2563eb",
+    });
+    if (!confirmation.isConfirmed) return;
+    setTermBusy(true);
+    try {
+      const { error } = await supabase.rpc("activate_academic_term", {
+        p_school_year: year,
+        p_semester: nextSemester,
+      });
+      if (error) throw error;
+      await loadAcademicTerms();
+      await Swal.fire({ icon: "success", title: "Semester Opened", text: `${nextSemester}, ${year} is now active.` });
+    } catch (error) {
+      await Swal.fire({ icon: "error", title: "Unable to Open Semester", text: error?.message || "Please try again." });
+    } finally {
+      setTermBusy(false);
+    }
+  };
 
   const hasChanges =
     useMemo(() => {
@@ -477,6 +588,113 @@ function SystemSettings() {
               );
             }
           )}
+        </section>
+
+        {/* Live academic semester management (separate from UI-only general settings). */}
+        <section className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.09)]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-5 py-5 sm:px-6">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">Academic Cycle</p>
+              <h2 className="mt-1 text-2xl font-black text-slate-900">Semester Management</h2>
+              <p className="mt-1 text-sm text-slate-500">Manage academic terms and preserve previous clearance records.</p>
+            </div>
+            <button type="button" onClick={loadAcademicTerms} disabled={termBusy || termLoading}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-50">
+              <FaRedo className={termLoading ? "animate-spin" : ""} /> Refresh
+            </button>
+          </div>
+          <div className="space-y-5 p-5 sm:p-6">
+            {termError && <p role="alert" className="rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{termError}</p>}
+            {termLoading ? (
+              <div className="flex items-center gap-2 py-8 text-sm text-slate-500"><FaSpinner className="animate-spin" /> Loading academic terms...</div>
+            ) : (
+              <>
+                <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Current Academic Term</p>
+                      <h3 className="mt-2 text-xl font-black text-slate-900">
+                        {activeTerm ? `${activeTerm.semester} · ${activeTerm.school_year}` : "No active semester"}
+                      </h3>
+                    </div>
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${activeTerm ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
+                      {activeTerm ? "Active" : "Inactive"}
+                    </span>
+                  </div>
+                  {activeTerm && (
+                    <>
+                      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        {[
+                          { label: "Total Clearances", value: activeCounts.total },
+                          { label: "Completed", value: activeCounts.completed },
+                          { label: "Unfinished", value: activeCounts.unfinished },
+                        ].map((item) => (
+                          <div key={item.label} className="rounded-xl border border-blue-100 bg-white p-4">
+                            <p className="text-xs font-semibold text-slate-500">{item.label}</p>
+                            <p className="mt-1 text-2xl font-black text-slate-900">{item.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-5 flex flex-wrap items-center gap-3">
+                        <button type="button" onClick={handleCloseTerm}
+                          disabled={termBusy || activeCounts.unfinished > 0 || !!termError}
+                          className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-3 text-sm font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50">
+                          <FaLock /> {termBusy ? "Processing..." : "Close Semester"}
+                        </button>
+                        {activeCounts.unfinished > 0 && (
+                          <p className="text-sm text-amber-800">Cannot close: {activeCounts.unfinished} unfinished clearance request(s).</p>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+                {!activeTerm && (
+                  <div className="rounded-2xl border border-slate-200 p-5">
+                    <h3 className="flex items-center gap-2 font-black text-slate-900"><FaPlusCircle className="text-blue-600" /> Open New Semester</h3>
+                    <p className="mt-1 text-sm text-slate-500">Ensure the next term's sections and class offerings are ready before activation.</p>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <label className="text-sm font-semibold text-slate-700">School Year
+                        <input value={nextYear} onChange={(e) => setNextYear(e.target.value)} placeholder="2026-2027" maxLength={9}
+                          className="mt-2 block w-full rounded-xl border border-slate-300 p-3 outline-none focus:border-blue-600" />
+                      </label>
+                      <label className="text-sm font-semibold text-slate-700">Semester
+                        <select value={nextSemester} onChange={(e) => setNextSemester(e.target.value)}
+                          className="mt-2 block w-full rounded-xl border border-slate-300 bg-white p-3 outline-none focus:border-blue-600">
+                          <option>1st Semester</option><option>2nd Semester</option><option>Summer</option>
+                        </select>
+                      </label>
+                    </div>
+                    <button type="button" onClick={handleOpenTerm} disabled={termBusy || !!termError}
+                      className="mt-4 inline-flex items-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-50">
+                      <FaPlusCircle /> {termBusy ? "Processing..." : "Open Semester"}
+                    </button>
+                  </div>
+                )}
+                <div>
+                  <h3 className="flex items-center gap-2 text-lg font-black text-slate-900"><FaHistory className="text-blue-600" /> Academic Term History</h3>
+                  <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="min-w-full divide-y divide-slate-100 text-left text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>
+                        <th className="px-4 py-3">School Year</th><th className="px-4 py-3">Semester</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Completed</th><th className="px-4 py-3">Unfinished</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {terms.length === 0 ? <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500">No academic terms found.</td></tr> : terms.map((term) => {
+                          const counts = termCounts[`${term.school_year}|${term.semester}`] || { completed: 0, unfinished: 0 };
+                          return <tr key={term.id}>
+                            <td className="px-4 py-3 font-semibold text-slate-800">{term.school_year}</td>
+                            <td className="px-4 py-3">{term.semester}</td>
+                            <td className="px-4 py-3">{term.status}</td>
+                            <td className="px-4 py-3">{counts.completed}</td>
+                            <td className="px-4 py-3">{counts.unfinished}</td>
+                          </tr>;
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </section>
 
         <form

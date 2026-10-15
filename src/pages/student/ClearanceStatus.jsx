@@ -275,6 +275,13 @@ function ClearanceStatus() {
 
   const [student, setStudent] = useState(null);
   const [clearanceRequest, setClearanceRequest] = useState(null);
+  const [activeTerm, setActiveTerm] = useState(null);
+  const [clearanceHistory, setClearanceHistory] = useState([]);
+  const [selectedArchiveId, setSelectedArchiveId] = useState("");
+  const viewingArchive = Boolean(clearanceRequest && (!activeTerm ||
+    clearanceRequest.school_year !== activeTerm.school_year ||
+    clearanceRequest.semester !== activeTerm.semester));
+
   const [steps, setSteps] = useState([]);
 
   const [treasurerSchedule, setTreasurerSchedule] = useState(null);
@@ -344,27 +351,33 @@ function ClearanceStatus() {
 
       setStudent(studentData);
 
-      const { data: requestData, error: requestError } = await supabase
-        .from("clearance_requests")
-        .select(`
-          id,
-          student_id,
-          school_year,
-          semester,
-          status,
-          remarks,
-          requested_at,
-          updated_at,
-          completed_at
-        `)
-        .eq("student_id", studentData.id)
-        .order("requested_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { data: activeRows, error: termError } = await supabase
+        .from("academic_terms")
+        .select("id, school_year, semester, is_active")
+        .eq("is_active", true)
+        .limit(1);
+      if (termError) throw termError;
+      const term = activeRows?.[0] || null;
+      setActiveTerm(term);
 
+      const { data: allRequests, error: requestError } = await supabase
+        .from("clearance_requests")
+        .select("id, student_id, school_year, semester, status, remarks, requested_at, updated_at, completed_at")
+        .eq("student_id", studentData.id)
+        .order("requested_at", { ascending: false });
       if (requestError) throw requestError;
 
-      setClearanceRequest(requestData || null);
+      const isCurrent = (request) => Boolean(term) &&
+        request.school_year === term.school_year && request.semester === term.semester;
+      const records = allRequests || [];
+      const archived = records.filter((request) => !isCurrent(request));
+      setClearanceHistory(archived);
+      const requestData = selectedArchiveId
+        ? archived.find((request) => request.id === selectedArchiveId) || null
+        : records.find(isCurrent) || null;
+      setClearanceRequest(requestData);
+      setClearancePass(null);
+      setShowClearancePass(false);
 
       try {
         setTreasurerScheduleError("");
@@ -635,7 +648,7 @@ function ClearanceStatus() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [selectedArchiveId]);
 
   useEffect(() => {
     loadClearanceStatus();
@@ -898,12 +911,13 @@ function ClearanceStatus() {
 
     loadDigitalClearancePass({ openModal: false, showError: false });
 
-    handleSendPassEmail({ force: false, showSuccess: false });
+    if (!viewingArchive) handleSendPassEmail({ force: false, showSuccess: false });
   }, [
     clearanceRequest?.id,
     clearanceRequest?.status,
     loadDigitalClearancePass,
     handleSendPassEmail,
+    viewingArchive,
   ]);
 
   /* ============================================================
@@ -1176,6 +1190,7 @@ function ClearanceStatus() {
   ============================================================ */
 
   const handleOfficeQuestionResponse = async (stepId, requirementId, answer) => {
+    if (viewingArchive) return;
     const responseKey = `${stepId}:${requirementId}`;
 
     try {
@@ -1236,6 +1251,7 @@ function ClearanceStatus() {
   ============================================================ */
 
   const handleTreasurerRescheduleRequest = async () => {
+    if (viewingArchive) return;
     if (!treasurerSchedule?.id) return;
 
     const batch = Array.isArray(treasurerSchedule.treasurer_batches)
@@ -1457,6 +1473,40 @@ function ClearanceStatus() {
           </div>
         </section>
 
+        {/* ACTIVE TERM / PREVIOUS SEMESTER ARCHIVE */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-sm font-black text-slate-900">Academic Clearance Cycle</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                {activeTerm ? `Active: ${activeTerm.semester} • ${activeTerm.school_year}` : "No active academic semester."}
+              </p>
+            </div>
+            <select
+              aria-label="Choose clearance cycle"
+              value={selectedArchiveId}
+              onChange={(event) => {
+                setSelectedArchiveId(event.target.value);
+                setExpandedStepId(null);
+                setStatusTab("all");
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 sm:w-auto"
+            >
+              <option value="">Current Semester</option>
+              {clearanceHistory.map((request) => (
+                <option key={request.id} value={request.id}>
+                  {request.semester} • {request.school_year} — {request.status}
+                </option>
+              ))}
+            </select>
+          </div>
+          {viewingArchive && (
+            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
+              Previous semester clearance — read-only view. Your earlier approvals are preserved.
+            </p>
+          )}
+        </section>
+
         {/* SEARCH BANNER */}
 
         {searchKeyword && (
@@ -1496,13 +1546,15 @@ function ClearanceStatus() {
             </h2>
 
             <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
-              Submit a clearance request first. Your office and subject
-              approval progress will appear here.
+              {activeTerm
+                ? "No clearance request for the active semester. Submit a new request to begin."
+                : "No semester is active. Wait for the Administrator to open a new term."}
             </p>
 
             <button
               type="button"
               onClick={() => navigate("/student/request-clearance")}
+              disabled={!activeTerm}
               className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
             >
               Request Clearance
@@ -1570,7 +1622,7 @@ function ClearanceStatus() {
 
                   <button
                     type="button"
-                    disabled={sendingPassEmail}
+                    disabled={sendingPassEmail || viewingArchive}
                     onClick={() =>
                       handleSendPassEmail({ force: true, showSuccess: true })
                     }
@@ -1676,7 +1728,7 @@ function ClearanceStatus() {
 
             {/* TREASURER SCHEDULE */}
 
-            {!treasurerSchedule && (
+            {!viewingArchive && !treasurerSchedule && (
               <section className="rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 shadow-sm sm:px-6">
                 <div className="flex items-start gap-3">
                   <FaCalendarAlt className="mt-1 shrink-0 text-indigo-600" />
@@ -1692,7 +1744,7 @@ function ClearanceStatus() {
               </section>
             )}
 
-            {treasurerSchedule && (
+            {!viewingArchive && treasurerSchedule && (
               <section className="overflow-hidden rounded-2xl border border-indigo-200 bg-white shadow-sm">
                 <div className="flex flex-col gap-3 bg-indigo-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                   <div className="flex min-w-0 items-start gap-3">
@@ -1892,7 +1944,7 @@ function ClearanceStatus() {
                   onToggleGroup={() => toggleGroup(group.key)}
                   expandedStepId={expandedStepId}
                   onToggleStep={toggleExpanded}
-                  onOfficeQuestionResponse={handleOfficeQuestionResponse}
+                  onOfficeQuestionResponse={viewingArchive ? null : handleOfficeQuestionResponse}
                   savingOfficeResponseKey={savingOfficeResponseKey}
                 />
               ))
@@ -2041,7 +2093,7 @@ function ClearanceStatus() {
 
                   <button
                     type="button"
-                    disabled={sendingPassEmail}
+                    disabled={sendingPassEmail || viewingArchive}
                     onClick={() =>
                       handleSendPassEmail({ force: true, showSuccess: true })
                     }

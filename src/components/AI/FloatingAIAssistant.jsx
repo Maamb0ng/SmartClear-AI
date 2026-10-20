@@ -27,6 +27,8 @@ import {
 import { sendGeminiMessage } from "../../services/aiService";
 import { supabase } from "../../services/supabase";
 
+const CHAT_STORAGE_PREFIX = "smartclear-floating-ai-chat";
+
 const WELCOME_MESSAGE = {
   id: "smartclear-floating-welcome",
   sender: "bot",
@@ -354,6 +356,118 @@ function FloatingAIAssistant() {
 
   const dragConstraintsRef =
     useRef(null);
+
+  // Preserve conversations separately for each authenticated student.
+  const [chatReady, setChatReady] = useState(false);
+  const [chatUserId, setChatUserId] = useState(null);
+  const chatUserRef = useRef(null);
+  const chatReadyRef = useRef(false);
+  const chatsRef = useRef(chats);
+  const interactionRef = useRef(previousInteractionId);
+  const draftRef = useRef(message);
+  const sessionRef = useRef(0);
+  const sendingRef = useRef(false);
+
+  const saveChat = (userId = chatUserRef.current) => {
+    if (!userId || !chatReadyRef.current || chatUserRef.current !== userId) return;
+    try {
+      localStorage.setItem(`${CHAT_STORAGE_PREFIX}:${userId}`, JSON.stringify({
+        chats: chatsRef.current,
+        previousInteractionId: interactionRef.current,
+        draft: draftRef.current,
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      console.error("Unable to save floating AI chat:", error);
+    }
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    const restore = (user) => {
+      if (!mounted) return;
+      const userId = user?.id || null;
+      if (chatUserRef.current === userId && chatReadyRef.current) return;
+      sessionRef.current += 1;
+      chatReadyRef.current = false;
+      chatUserRef.current = userId;
+      setChatUserId(userId);
+      setChatReady(false);
+      sendingRef.current = false;
+      setSending(false);
+      let restoredChats = [WELCOME_MESSAGE];
+      let restoredInteraction = null;
+      let restoredDraft = "";
+      if (userId) {
+        try {
+          const raw = localStorage.getItem(`${CHAT_STORAGE_PREFIX}:${userId}`);
+          if (raw) {
+            const stored = JSON.parse(raw);
+            if (Array.isArray(stored?.chats)) {
+              const valid = stored.chats.filter((item) =>
+                item && typeof item.id === "string" &&
+                ["user", "bot", "error"].includes(item.sender) &&
+                typeof item.text === "string"
+              );
+              if (valid.length) restoredChats = valid;
+            }
+            if (typeof stored?.previousInteractionId === "string") {
+              restoredInteraction = stored.previousInteractionId;
+            }
+            if (typeof stored?.draft === "string") restoredDraft = stored.draft;
+          }
+        } catch (error) {
+          console.error("Unable to restore floating AI chat:", error);
+        }
+      }
+      chatsRef.current = restoredChats;
+      interactionRef.current = restoredInteraction;
+      draftRef.current = restoredDraft;
+      setChats(restoredChats);
+      setPreviousInteractionId(restoredInteraction);
+      setMessage(restoredDraft);
+      chatReadyRef.current = Boolean(userId);
+      setChatReady(Boolean(userId));
+    };
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (["INITIAL_SESSION", "SIGNED_IN", "SIGNED_OUT", "USER_DELETED"].includes(event)) {
+        restore(session?.user || null);
+      }
+    });
+    supabase.auth.getUser().then(({ data }) => {
+      if (mounted && !chatReadyRef.current && data?.user) restore(data.user);
+    }).catch((error) => console.error("Floating AI authentication:", error));
+    return () => { mounted = false; subscription.unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    if (!chatReady || !chatUserId || chatUserRef.current !== chatUserId) return;
+    chatsRef.current = chats;
+    interactionRef.current = previousInteractionId;
+    draftRef.current = message;
+    saveChat(chatUserId);
+  }, [chats, previousInteractionId, message, chatReady, chatUserId]);
+
+  const [showRejected, setShowRejected] = useState(false);
+  const rejectedSteps = useMemo(() =>
+    (clearanceData?.steps || []).filter((step) => normalizeStatus(step.status) === "rejected"),
+    [clearanceData]
+  );
+
+  const handleRecommendations = () => sendMessage(
+    "Generate my personalized SmartClear AI recommendations based only on my verified, latest clearance records. " +
+    "Prioritize rejected requirements, then pending items, and explain specific practical next steps. " +
+    "Distinguish awaiting approval from needing a student submission. " +
+    "Do not invent deadlines, batch schedules, office policies, or required documents. " +
+    "If you cannot access the verified records, say so clearly."
+  );
+
+  const handleExplainRejection = (step) => sendMessage(
+    `Explain my rejected clearance requirement named "${step.name}". ` +
+    `The approver's recorded remark is: "${step.remarks || "No remarks provided"}". ` +
+    "Explain this in simple terms and suggest what I should verify or correct. " +
+    "Do not invent requirements or claim the requirement has been approved."
+  );
 
   /*
   |--------------------------------------------------------------------------
@@ -990,78 +1104,48 @@ function FloatingAIAssistant() {
   |--------------------------------------------------------------------------
   */
 
-  const sendMessage =
-    async (
-      customMessage = null
-    ) => {
-      const outgoing =
-        normalizeText(
-          customMessage ??
-            message
-        );
+  const sendMessage = async (customMessage = null) => {
+    const outgoing = normalizeText(customMessage ?? draftRef.current);
+    if (!outgoing || sendingRef.current || !chatReadyRef.current || !chatUserRef.current) return;
 
-      if (
-        !outgoing ||
-        sending
-      ) {
-        return;
-      }
+    const requestSession = sessionRef.current;
+    const userId = chatUserRef.current;
+    sendingRef.current = true;
+    const nextChats = [...chatsRef.current, createMessage("user", outgoing)];
+    chatsRef.current = nextChats;
+    draftRef.current = "";
+    setChats(nextChats);
+    setMessage("");
+    setSending(true);
+    saveChat(userId);
 
-      setChats(
-        (previous) => [
-          ...previous,
-          createMessage(
-            "user",
-            outgoing
-          ),
-        ]
-      );
-
-      setMessage("");
-      setSending(true);
-
-      try {
-        const result =
-          await sendGeminiMessage({
-            message: outgoing,
-
-            previousInteractionId,
-          });
-
-        setChats(
-          (previous) => [
-            ...previous,
-            createMessage(
-              "bot",
-              result.reply
-            ),
-          ]
-        );
-
-        setPreviousInteractionId(
-          result.interactionId ||
-            previousInteractionId
-        );
-      } catch (error) {
-        console.error(
-          "Floating SmartClear AI:",
-          error
-        );
-
-        setChats(
-          (previous) => [
-            ...previous,
-            createMessage(
-              "error",
-              error?.message ||
-                "SmartClear AI is temporarily unavailable."
-            ),
-          ]
-        );
-      } finally {
+    try {
+      const result = await sendGeminiMessage({
+        message: outgoing,
+        previousInteractionId: interactionRef.current,
+      });
+      if (requestSession !== sessionRef.current || userId !== chatUserRef.current) return;
+      const updated = [...chatsRef.current, createMessage("bot", result.reply)];
+      chatsRef.current = updated;
+      setChats(updated);
+      interactionRef.current = result.interactionId || interactionRef.current;
+      setPreviousInteractionId(interactionRef.current);
+      saveChat(userId);
+    } catch (error) {
+      if (requestSession !== sessionRef.current || userId !== chatUserRef.current) return;
+      console.error("Floating SmartClear AI:", error);
+      const updated = [...chatsRef.current, createMessage("error",
+        error?.message || "SmartClear AI is temporarily unavailable.")];
+      chatsRef.current = updated;
+      setChats(updated);
+      saveChat(userId);
+    } finally {
+      if (requestSession === sessionRef.current && userId === chatUserRef.current) {
+        sendingRef.current = false;
         setSending(false);
       }
-    };
+    }
+  };
 
   const handleSubmit = (
     event
@@ -1393,6 +1477,57 @@ function FloatingAIAssistant() {
                 )}
               </div>
 
+              {/* PERSONALIZED AI TOOLS */}
+              <div className="border-b border-slate-200 bg-white px-4 py-4">
+                <div className="flex items-center gap-2">
+                  <FaMagic className="text-violet-500" />
+                  <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">
+                    AI Smart Tools
+                  </p>
+                </div>
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleRecommendations}
+                  disabled={sending || !chatReady || contextLoading}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-3 py-3 text-xs font-bold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <FaBolt /> Generate AI Recommendations
+                </motion.button>
+                {rejectedSteps.length > 0 && (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowRejected((value) => !value)}
+                      className="flex w-full items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-left text-xs font-bold text-rose-700"
+                    >
+                      <span>Explain Rejected Requirements ({rejectedSteps.length})</span>
+                      <FaChevronDown className={showRejected ? "rotate-180" : ""} />
+                    </button>
+                    {showRejected && (
+                      <div className="mt-2 space-y-2">
+                        {rejectedSteps.map((step) => (
+                          <div key={step.id} className="rounded-xl border border-rose-100 bg-white p-3">
+                            <p className="text-xs font-bold text-slate-800">{step.name}</p>
+                            <p className="mt-1 whitespace-pre-wrap text-[11px] leading-5 text-slate-600">
+                              {step.remarks || "No approver remarks provided."}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => handleExplainRejection(step)}
+                              disabled={sending || !chatReady}
+                              className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+                            >
+                              <FaMagic /> Explain with AI
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* QUICK ACTIONS */}
 
               <div className="border-b border-slate-200 bg-white px-4 py-4">
@@ -1416,7 +1551,7 @@ function FloatingAIAssistant() {
                           )
                         }
                         disabled={
-                          sending
+                          sending || !chatReady
                         }
                         className="rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-[10px] font-bold text-blue-700 transition hover:border-blue-200 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -1587,16 +1722,13 @@ function FloatingAIAssistant() {
                   onChange={(
                     event
                   ) =>
-                    setMessage(
-                      event.target
-                        .value
-                    )
+                    (draftRef.current = event.target.value, setMessage(event.target.value))
                   }
                   onKeyDown={
                     handleKeyDown
                   }
                   disabled={
-                    sending
+                    sending || !chatReady
                   }
                   placeholder="Ask SmartClear AI..."
                   className="max-h-24 min-h-[42px] flex-1 resize-none bg-transparent px-3 py-2.5 text-xs text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
@@ -1609,7 +1741,7 @@ function FloatingAIAssistant() {
                   type="submit"
                   disabled={
                     !message.trim() ||
-                    sending
+                    sending || !chatReady
                   }
                   className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-md transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >

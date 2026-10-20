@@ -1456,6 +1456,50 @@ function Assistant() {
       studentContext,
     ]);
 
+  // Rejected items shown here come from the signed-in student's live context.
+  // The Edge Function independently verifies the student's records for Gemini.
+  const rejectedRequirements = useMemo(() =>
+    (studentContext?.clearance?.steps || []).filter(
+      (step) => String(step.status || "").trim().toLowerCase() === "rejected"
+    ), [studentContext]
+  );
+
+  const canUseAIAction =
+    chatStorageReady && !sending && !contextLoading && !contextError;
+
+  const handleSmartRecommendations = () => {
+    sendMessage(
+      `Generate personalized SMART CLEARANCE RECOMMENDATIONS based only on my latest verified SmartClear clearance records.\n\n` +
+      `First summarize my current clearance progress. Then list up to five prioritized next actions, ` +
+      `naming the exact pending or rejected subject/office when supported by the records. ` +
+      `Use actual approver remarks and submission status where available. ` +
+      `Explain what I can do now versus what requires an office or teacher to act. ` +
+      `Do not invent deadlines, batch assignments, requirements, payment status, or decisions. ` +
+      `If information is missing, explicitly say it is not available. ` +
+      `If I have no clearance request, guide me to request one. ` +
+      `If fully approved, explain how to find my digital clearance pass. ` +
+      `Keep the answer clear, concise, and student-friendly.`
+    );
+  };
+
+  const handleExplainRejection = (step) => {
+    if (!step || String(step.status || "").toLowerCase() !== "rejected") return;
+    // Only identifiers/remarks already visible to this student are included.
+    // The server must independently verify the student's current step.
+    const target = String(step.target || "Clearance Requirement").slice(0, 160);
+    const remarks = String(step.remarks || "").slice(0, 1200);
+    sendMessage(
+      `Explain the rejection of my SmartClear clearance requirement named "${target}". ` +
+      `Use the latest verified record for this requirement and compare it with the following displayed approver remark: ` +
+      `${JSON.stringify(remarks || "No remarks provided")}. ` +
+      `In simple language, explain (1) what the remark means, (2) what I should check or prepare, ` +
+      `(3) the appropriate next step or how to ask the approver for clarification. ` +
+      `Do not assume an upload, resubmission, recheck, or deadline is available unless verified. ` +
+      `Do not fabricate missing details or claim that rejection has been reversed. ` +
+      `Keep the response short and practical.`
+    );
+  };
+
   const canSend =
     useMemo(() => {
       return (
@@ -2012,6 +2056,46 @@ function Assistant() {
                 ) : null}
               </div>
 
+              <div className="mt-5 space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-100/45">
+                  AI Clearance Tools
+                </p>
+                <motion.button
+                  type="button"
+                  whileHover={{ x: 3 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleSmartRecommendations}
+                  disabled={!canUseAIAction}
+                  className="flex w-full items-center gap-3 rounded-xl border border-cyan-300/25 bg-gradient-to-r from-cyan-600 to-blue-600 px-3 py-3 text-left text-xs font-black text-white shadow-lg transition disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <FaMagic className="shrink-0 text-base" />
+                  <span>Generate AI Smart Recommendations</span>
+                </motion.button>
+                {rejectedRequirements.length > 0 && (
+                  <div className="space-y-2 rounded-xl border border-rose-300/20 bg-rose-400/[0.08] p-3">
+                    <p className="flex items-center gap-2 text-xs font-black text-rose-100">
+                      <FaExclamationTriangle /> Rejection Remarks Explainer
+                    </p>
+                    {rejectedRequirements.map((step) => (
+                      <div key={step.id} className="rounded-lg border border-white/10 bg-white/[0.06] p-2.5">
+                        <p className="break-words text-xs font-bold text-white">{step.target}</p>
+                        <p className="mt-1 line-clamp-2 break-words text-[11px] text-blue-100/70">
+                          {step.remarks || "No approver remarks provided."}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleExplainRejection(step)}
+                          disabled={!canUseAIAction}
+                          className="mt-2 rounded-lg border border-rose-200/25 bg-rose-400/15 px-3 py-1.5 text-[11px] font-bold text-rose-100 transition hover:bg-rose-400/25 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Explain with AI
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="mt-5">
                 <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-100/45">
                   Smart Suggestions
@@ -2413,6 +2497,38 @@ function Assistant() {
                     </div>
                   </div>
                 </motion.div>
+              )}
+            </div>
+
+            {/* AI tools remain accessible on phones and tablets. */}
+            <div className="border-t border-slate-200/70 bg-white px-4 py-2 xl:hidden">
+              <button
+                type="button"
+                onClick={handleSmartRecommendations}
+                disabled={!canUseAIAction}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-700 px-3 py-2.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FaMagic /> Generate AI Smart Recommendations
+              </button>
+              {rejectedRequirements.length > 0 && (
+                <div className="mt-2 max-h-36 space-y-2 overflow-y-auto">
+                  {rejectedRequirements.map((step) => (
+                    <div key={step.id} className="flex items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 p-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-bold text-rose-900">{step.target}</p>
+                        <p className="truncate text-[11px] text-rose-700">{step.remarks || "No approver remarks provided."}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleExplainRejection(step)}
+                        disabled={!canUseAIAction}
+                        className="shrink-0 rounded-lg bg-rose-700 px-2.5 py-2 text-[11px] font-bold text-white disabled:opacity-50"
+                      >
+                        Explain with AI
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 

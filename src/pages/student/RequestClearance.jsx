@@ -169,8 +169,8 @@ const isSubmissionWindowOpen = (step) => {
 
   return Boolean(
     subjectNeedsStudentSubmission(step) &&
-      requirement?.is_open === true &&
-      !isPastDeadline(requirement)
+      (step.status === "Rejected" ||
+        (requirement?.is_open === true && !isPastDeadline(requirement)))
   );
 };
 
@@ -226,26 +226,6 @@ const getSubmissionBlockedReason = (step) => {
 
     const now = Date.now();
 
-    if (settings.opens_at && now < new Date(settings.opens_at).getTime()) {
-      return {
-        key: "office-upcoming",
-        title: "Submission Not Yet Open",
-        message: `The office will open submissions on ${new Date(
-          settings.opens_at
-        ).toLocaleString()}.`,
-      };
-    }
-
-    if (settings.closes_at && now >= new Date(settings.closes_at).getTime()) {
-      return {
-        key: "office-deadline",
-        title: "Submission Deadline Passed",
-        message: `The office submission deadline was ${new Date(
-          settings.closes_at
-        ).toLocaleString()}.`,
-      };
-    }
-
     // The server remains authoritative for batch membership and timing.
     // The local check is only for user feedback, not authorization.
     if (step.officeBatch) {
@@ -299,6 +279,31 @@ const getSubmissionBlockedReason = (step) => {
       }
     }
 
+    // For offices without an assigned batch, retain the office-level window.
+    // A batch assignment uses its own schedule instead of the office dates.
+    if (!step.officeBatch) {
+      if (settings.opens_at && now < new Date(settings.opens_at).getTime()) {
+        return {
+          key: "office-upcoming",
+          title: "Submission Not Yet Open",
+          message: `The office will open submissions on ${new Date(
+            settings.opens_at
+          ).toLocaleString()}.`,
+        };
+      }
+
+      if (settings.closes_at && now >= new Date(settings.closes_at).getTime()) {
+        return {
+          key: "office-deadline",
+          title: "Submission Deadline Passed",
+          message: `The office submission deadline was ${new Date(
+            settings.closes_at
+          ).toLocaleString()}.`,
+        };
+      }
+
+    }
+
     // Offices without batch scheduling are validated by the backend.
     return null;
   }
@@ -322,6 +327,10 @@ const getSubmissionBlockedReason = (step) => {
         "No student upload is required for this subject. The assigned teacher will review and clear this step directly.",
     };
   }
+
+  // A rejected subject step can be corrected even after its initial deadline.
+  // The Supabase RPC remains responsible for final authorization.
+  if (step.status === "Rejected") return null;
 
   if (isPastDeadline(requirement)) {
     return {

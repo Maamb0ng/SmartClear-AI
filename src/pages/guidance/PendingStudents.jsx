@@ -26,6 +26,7 @@ import {
   FaIdCard,
   FaGraduationCap,
   FaHourglassHalf,
+  FaEdit,
 } from "react-icons/fa";
 
 import GuidanceLayout from "../../layouts/GuidanceLayout";
@@ -343,6 +344,9 @@ function PendingStudents() {
 
   const [formData, setFormData] =
     useState(INITIAL_FORM);
+
+  const [editingBatch, setEditingBatch] = useState(null);
+  const [editForm, setEditForm] = useState(INITIAL_FORM);
 
   // =========================================================
   // SORT STUDENTS
@@ -755,6 +759,77 @@ function PendingStudents() {
     };
 
   // =========================================================
+  // MANAGE EXISTING GUIDANCE BATCH
+  // =========================================================
+
+  const openManageBatch = (batch) => {
+    if (["Completed", "Cancelled"].includes(batch.status)) return;
+    setEditForm({
+      batch_name: batch.batch_name || "",
+      school_year: batch.school_year || "",
+      semester: batch.semester || "",
+      schedule_date: batch.schedule_date || "",
+      start_time: cleanDatabaseTime(batch.start_time).slice(0, 5),
+      deadline_date: batch.deadline_date || batch.schedule_date || "",
+      end_time: cleanDatabaseTime(batch.end_time).slice(0, 5),
+      question: batch.question || "",
+      instructions: batch.instructions || "",
+      max_students: batch.max_students || 30,
+    });
+    setEditingBatch(batch);
+  };
+
+  const handleSaveBatch = async (event) => {
+    event.preventDefault();
+    if (!editingBatch || saving) return;
+
+    const start = createScheduleDate(editForm.schedule_date, editForm.start_time);
+    const end = createScheduleDate(editForm.deadline_date, editForm.end_time);
+    if (!start || !end || end <= start) {
+      await Swal.fire("Invalid Schedule", "The deadline must be later than the start date and time.", "warning");
+      return;
+    }
+    const assigned = batchCounts[editingBatch.id]?.assigned || 0;
+    const capacity = Number(editForm.max_students);
+    if (!Number.isInteger(capacity) || capacity < Math.max(1, assigned)) {
+      await Swal.fire("Invalid Capacity", `Capacity must be at least ${Math.max(1, assigned)}.`, "warning");
+      return;
+    }
+
+    const confirmation = await Swal.fire({
+      icon: "question",
+      title: "Save batch changes?",
+      text: "The updated schedule will apply to students already assigned to this batch. Existing responses and assignments will be retained.",
+      showCancelButton: true,
+      confirmButtonText: "Save Changes",
+      confirmButtonColor: "#2563eb",
+    });
+    if (!confirmation.isConfirmed) return;
+
+    try {
+      setSaving(true);
+      const result = await updateGuidanceBatch(editingBatch.id, {
+        batch_name: editForm.batch_name.trim(),
+        schedule_date: editForm.schedule_date,
+        start_time: editForm.start_time,
+        deadline_date: editForm.deadline_date,
+        end_time: editForm.end_time,
+        question: editForm.question.trim(),
+        instructions: editForm.instructions.trim(),
+        max_students: capacity,
+      });
+      if (!result.success) throw new Error(result.error || "Unable to save batch changes.");
+      setEditingBatch(null);
+      await loadPage({ silent: true });
+      await Swal.fire("Batch Updated", "The Guidance batch changes were saved.", "success");
+    } catch (error) {
+      await Swal.fire("Update Failed", error?.message || "Please try again.", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // =========================================================
   // CHANGE DATABASE STATUS
   // =========================================================
 
@@ -874,31 +949,12 @@ function PendingStudents() {
           minutes * 60 * 1000
       );
 
-      const newDate =
-        newEnd.toLocaleDateString(
-          "en-CA",
-          {
-            timeZone:
-              "Asia/Manila",
-          }
-        );
-
-      if (
-        newDate !==
-        batch.schedule_date
-      ) {
-        await Swal.fire({
-          icon: "warning",
-          title:
-            "Cannot Extend",
-          text:
-            "This batch currently supports same-day schedules only.",
-          confirmButtonColor:
-            "#2563eb",
-        });
-
-        return;
-      }
+      const newDate = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Manila",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(newEnd);
 
       const newTime =
         newEnd.toLocaleTimeString(
@@ -949,6 +1005,7 @@ function PendingStudents() {
             batch.id,
             {
               end_time: newTime,
+              deadline_date: newDate,
             }
           );
 
@@ -1780,6 +1837,12 @@ function PendingStudents() {
                       />
 
                       <InfoItem
+                        icon={FaCalendarAlt}
+                        label="Deadline"
+                        value={formatDate(batch.deadline_date || batch.schedule_date)}
+                      />
+
+                      <InfoItem
                         icon={FaClock}
                         label="Time"
                         value={`${formatTime(
@@ -1918,6 +1981,16 @@ function PendingStudents() {
                     {/* ACTIONS */}
 
                     <div className="mt-5 flex flex-wrap gap-2">
+                      {!["Completed", "Cancelled"].includes(batch.status) && (
+                        <button
+                          type="button"
+                          onClick={() => openManageBatch(batch)}
+                          disabled={saving}
+                          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3.5 py-2.5 text-xs font-bold text-white transition hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          <FaEdit /> Manage Batch
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => openAssignedStudents(batch)}
@@ -2051,6 +2124,69 @@ function PendingStudents() {
           </div>
         )}
       </div>
+
+      {/* MANAGE GUIDANCE BATCH MODAL */}
+      {editingBatch && (
+        <ModalOverlay onClose={() => !saving && setEditingBatch(null)}>
+          <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <ModalHeader
+              title="Manage Guidance Batch"
+              subtitle={editingBatch.batch_name}
+              onClose={() => !saving && setEditingBatch(null)}
+            />
+            <form onSubmit={handleSaveBatch} className="max-h-[75vh] space-y-4 overflow-y-auto p-5 sm:p-6">
+              <div className="grid gap-4 sm:grid-cols-2">
+                {[
+                  { key: "batch_name", label: "Batch Name", type: "text" },
+                  { key: "max_students", label: "Maximum Students", type: "number", min: Math.max(1, batchCounts[editingBatch.id]?.assigned || 0) },
+                  { key: "schedule_date", label: "Start Date", type: "date" },
+                  { key: "start_time", label: "Start Time", type: "time" },
+                  { key: "deadline_date", label: "Deadline Date", type: "date", min: editForm.schedule_date },
+                  { key: "end_time", label: "Deadline Time", type: "time" },
+                ].map((field) => (
+                  <Field key={field.key} label={field.label} required>
+                    <input
+                      required
+                      type={field.type}
+                      min={field.min}
+                      value={editForm[field.key]}
+                      onChange={(event) => setEditForm((current) => ({ ...current, [field.key]: event.target.value }))}
+                      className={inputClass}
+                    />
+                  </Field>
+                ))}
+              </div>
+              <Field label="Guidance Question / Requirement" required>
+                <textarea
+                  required
+                  rows={3}
+                  value={editForm.question}
+                  onChange={(event) => setEditForm((current) => ({ ...current, question: event.target.value }))}
+                  className={`${inputClass} resize-none`}
+                />
+              </Field>
+              <Field label="Instructions">
+                <textarea
+                  rows={3}
+                  value={editForm.instructions}
+                  onChange={(event) => setEditForm((current) => ({ ...current, instructions: event.target.value }))}
+                  className={`${inputClass} resize-none`}
+                />
+              </Field>
+              <p className="rounded-xl bg-blue-50 p-3 text-xs text-blue-800">
+                Batch status: {editingBatch.status}. Changing the dates does not automatically reopen a Closed batch.
+                Assigned students and existing responses are not deleted.
+              </p>
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                <button type="button" disabled={saving} onClick={() => setEditingBatch(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold">Cancel</button>
+                <button type="submit" disabled={saving} className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </ModalOverlay>
+      )}
 
       {/* ASSIGNED STUDENTS MODAL — read-only, includes rescheduled students */}
       {assignedBatch && (

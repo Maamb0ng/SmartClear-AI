@@ -698,7 +698,11 @@ function Login() {
                     }}
                     className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-100 shadow-[0_14px_35px_rgba(37,99,235,0.18)]"
                   >
-                    <FaRobot className="text-4xl text-blue-700" />
+                    <img
+                      src={schoolLogo}
+                      alt="Consolatrix College of Toledo City seal"
+                      className="h-16 w-16 rounded-2xl object-contain"
+                    />
                   </motion.div>
 
                   <h2 className="mt-6 text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">

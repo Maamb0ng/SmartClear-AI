@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 
-import { FaUsers, FaCheckCircle, FaClock, FaClipboardList, FaSyncAlt, FaGraduationCap, FaArrowLeft, FaSignOutAlt } from "react-icons/fa";
+import { FaUsers, FaCheckCircle, FaClock, FaClipboardList, FaSyncAlt, FaGraduationCap, FaArrowLeft, FaSignOutAlt, FaSearch, FaChevronRight } from "react-icons/fa";
 
 import { supabase } from "../../services/supabase";
 
@@ -86,23 +86,57 @@ async function getByIds(table, columns, field, ids) {
 
 }
 
+/* ---------- Presentation-only helpers (no business logic) ---------- */
+
 const STATUS_STYLE = {
 
-  "Not Submitted": "bg-slate-100 text-slate-600",
+  "Not Submitted": "bg-slate-100 text-slate-600 ring-slate-200",
 
-  "In Progress": "bg-amber-50 text-amber-700",
+  "In Progress": "bg-amber-50 text-amber-700 ring-amber-200",
 
-  Ready: "bg-emerald-50 text-emerald-700",
+  Ready: "bg-emerald-50 text-emerald-700 ring-emerald-200",
 
-  Completed: "bg-blue-50 text-blue-700",
+  Completed: "bg-blue-50 text-blue-700 ring-blue-200",
 
-  "Needs Review": "bg-rose-50 text-rose-700",
+  "Needs Review": "bg-rose-50 text-rose-700 ring-rose-200",
 
 };
 
+const STATUS_DOT = {
+
+  "Not Submitted": "bg-slate-400",
+
+  "In Progress": "bg-amber-500",
+
+  Ready: "bg-emerald-500",
+
+  Completed: "bg-blue-500",
+
+  "Needs Review": "bg-rose-500",
+
+};
+
+const initialsOf = (name) => clean(name).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "S";
+
+function Avatar({ name }) {
+
+  return <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#082a70]/10 text-[11px] font-bold text-[#082a70]">{initialsOf(name)}</span>;
+
+}
+
 function StatusBadge({ student }) {
 
-  return <span className={`inline-flex whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium ${STATUS_STYLE[student.status] || STATUS_STYLE["In Progress"]}`}>{student.status}</span>;
+  return (
+
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${STATUS_STYLE[student.status] || STATUS_STYLE["In Progress"]}`}>
+
+      <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[student.status] || STATUS_DOT["In Progress"]}`} />
+
+      {student.status}
+
+    </span>
+
+  );
 
 }
 
@@ -112,7 +146,21 @@ function Progress({ student }) {
 
   const percent = student.totalOthers ? Math.round((student.approvedOthers / student.totalOthers) * 100) : 0;
 
-  return <div className="flex items-center gap-2"><div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500 transition-[width] duration-500" style={{ width: `${percent}%` }} /></div><span className="whitespace-nowrap text-xs tabular-nums text-slate-500">{student.approvedOthers}/{student.totalOthers}</span></div>;
+  return (
+
+    <div className="flex items-center gap-2.5">
+
+      <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label="Other signatories approved">
+
+        <div className={`h-full rounded-full transition-[width] duration-500 ${percent === 100 ? "bg-emerald-500" : "bg-[#082a70]"}`} style={{ width: `${percent}%` }} />
+
+      </div>
+
+      <span className="whitespace-nowrap text-xs font-medium tabular-nums text-slate-600">{student.approvedOthers}/{student.totalOthers}</span>
+
+    </div>
+
+  );
 
 }
 
@@ -475,13 +523,13 @@ function PresidentDashboard() {
 
       aria-pressed={active}
 
-      className={`inline-flex min-h-9 items-center gap-2 rounded-lg border px-3.5 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${active ? "border-indigo-600 bg-indigo-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-700 hover:border-indigo-200 hover:bg-indigo-50"}`}
+      className={`inline-flex min-h-10 items-center gap-2 rounded-lg border px-3.5 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#082a70]/40 ${active ? "border-[#082a70] bg-[#082a70] text-white shadow-sm" : "border-slate-200 bg-white text-slate-700 hover:border-[#082a70]/30 hover:bg-slate-50"}`}
 
     >
 
       {label}
 
-      {typeof count === "number" && <span className={`rounded px-1.5 py-0.5 text-[10px] tabular-nums ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{count}</span>}
+      {typeof count === "number" && <span className={`rounded-md px-1.5 py-0.5 text-[10px] tabular-nums ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{count}</span>}
 
     </motion.button>
 
@@ -489,111 +537,167 @@ function PresidentDashboard() {
 
   const studentTable = (items, showAcademic = false) => (
 
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+    <div className="bg-white">
 
-      <table className="w-full min-w-[620px] text-left">
+      {/* Desktop / tablet table */}
 
-        <thead className="bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+      <div className="hidden overflow-x-auto md:block">
 
-          <tr><th className="px-4 py-3">Student</th><th className="px-4 py-3">Student ID</th>
+        <table className="w-full text-left">
 
-            {showAcademic && <th className="px-4 py-3">Academic period</th>}
+          <thead className="border-y border-slate-100 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
 
-            <th className="px-4 py-3">Other signatories</th><th className="px-4 py-3">Status</th></tr>
+            <tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Student ID</th>
 
-        </thead>
+              {showAcademic && <th className="px-5 py-3">Academic period</th>}
 
-        <tbody className="divide-y divide-slate-100">
+              <th className="px-5 py-3">Other signatories</th><th className="px-5 py-3">Status</th></tr>
 
-          {items.map((student) => <tr key={student.id} className="transition-colors hover:bg-indigo-50/30">
+          </thead>
 
-            <td className="px-4 py-3 text-xs font-semibold text-slate-800">{student.name}</td>
+          <tbody className="divide-y divide-slate-100">
 
-            <td className="px-4 py-3 text-xs text-slate-500">{student.studentId || "—"}</td>
+            {items.map((student) => <tr key={student.id} className="transition-colors hover:bg-slate-50/70">
 
-            {showAcademic && <td className="px-4 py-3 text-xs text-slate-500">{student.semester} · {student.schoolYear}</td>}
+              <td className="px-5 py-3.5"><div className="flex items-center gap-3"><Avatar name={student.name}/><span className="text-sm font-semibold text-slate-800">{student.name}</span></div></td>
 
-            <td className="px-4 py-3"><Progress student={student}/></td>
+              <td className="px-5 py-3.5 text-xs tabular-nums text-slate-500">{student.studentId || "—"}</td>
 
-            <td className="px-4 py-3"><StatusBadge student={student}/></td>
+              {showAcademic && <td className="px-5 py-3.5 text-xs text-slate-500">{student.semester} · {student.schoolYear}</td>}
 
-          </tr>)}
+              <td className="px-5 py-3.5"><Progress student={student}/></td>
 
-        </tbody>
+              <td className="px-5 py-3.5"><StatusBadge student={student}/></td>
 
-      </table>
+            </tr>)}
+
+          </tbody>
+
+        </table>
+
+      </div>
+
+      {/* Mobile card list */}
+
+      <ul className="divide-y divide-slate-100 border-t border-slate-100 md:hidden">
+
+        {items.map((student) => <li key={student.id} className="space-y-3 px-4 py-4">
+
+          <div className="flex items-start justify-between gap-3">
+
+            <div className="flex min-w-0 items-center gap-3"><Avatar name={student.name}/><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{student.name}</p><p className="text-xs tabular-nums text-slate-500">{student.studentId || "—"}</p></div></div>
+
+            <StatusBadge student={student}/>
+
+          </div>
+
+          {showAcademic && <p className="text-xs text-slate-500">{student.semester} · {student.schoolYear}</p>}
+
+          <div className="flex items-center justify-between gap-3"><span className="text-xs text-slate-500">Other signatories</span><Progress student={student}/></div>
+
+        </li>)}
+
+      </ul>
 
     </div>
 
   );
 
+  const tabClass = (active) => `flex-1 whitespace-nowrap rounded-lg px-3.5 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#082a70]/40 sm:flex-none ${active ? "bg-white text-[#082a70] shadow-sm" : "text-slate-500 hover:text-slate-800"}`;
+
+  const tabCount = (active) => `ml-1.5 rounded-md px-1.5 py-0.5 text-[10px] tabular-nums ${active ? "bg-[#082a70]/10 text-[#082a70]" : "bg-slate-200/70 text-slate-500"}`;
+
+  const activeBatches = view === "ready" ? readyBatches : completedBatches;
+
+  const batchLabel = view === "ready" ? "ready" : "completed";
+
+  const overview = [
+
+    { label: "All Students", value: students.length, icon: FaUsers, tone: "bg-blue-50 text-blue-700" },
+
+    { label: "Ready for Approval", value: readyCount, icon: FaCheckCircle, tone: "bg-emerald-50 text-emerald-700" },
+
+    { label: "Completed", value: completedCount, icon: FaClipboardList, tone: "bg-indigo-50 text-indigo-700" },
+
+    { label: "Not Submitted", value: students.filter((s) => s.status === "Not Submitted").length, icon: FaClock, tone: "bg-slate-100 text-slate-600" },
+
+  ];
+
   return (
 
-    <main className="min-h-screen bg-[#f5f7fb] px-4 py-5 text-slate-900 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-slate-50 px-3 py-4 text-slate-900 sm:px-6 sm:py-6 lg:px-8">
 
-      <div className="mx-auto max-w-7xl space-y-5">
+      <div className="mx-auto max-w-7xl space-y-5 sm:space-y-6">
 
-        <motion.header initial={reducedMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={animation} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <motion.header initial={reducedMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={animation} className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#061b51] via-[#082a70] to-[#0b3a94] shadow-lg shadow-[#061b51]/20">
 
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3 sm:px-6">
+          <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full bg-white/5 blur-2xl" />
 
-            <div className="flex items-center gap-2.5">
+          <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 left-1/3 h-56 w-56 rounded-full bg-sky-400/10 blur-3xl" />
 
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white"><FaGraduationCap size={15}/></span>
+          <div className="relative flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-6">
 
-              <span className="text-xs font-bold tracking-[0.12em] text-slate-700">SMARTCLEAR <span className="text-indigo-600">AI</span></span>
+            <div className="flex min-w-0 items-center gap-3">
 
-              <span className="hidden border-l border-slate-200 pl-3 text-xs text-slate-400 sm:inline">President Workspace</span>
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white ring-1 ring-white/20 backdrop-blur"><FaGraduationCap size={16}/></span>
 
-            </div>
+              <div className="min-w-0 leading-tight">
 
-                          <div className="flex items-center gap-2">
+                <p className="truncate text-sm font-bold tracking-wide text-white">SmartClear <span className="text-sky-300">AI</span></p>
 
-                <span className="hidden rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 sm:inline-flex">Final signatory</span>
-
-                <button type="button" onClick={handleLogout} disabled={loggingOut} className="inline-flex h-9 items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-60" aria-label="Log out of President Workspace">
-
-                  <FaSignOutAlt size={13} /> {loggingOut ? "Logging out..." : "Logout"}
-
-                </button>
+                <p className="hidden text-[11px] text-blue-200/80 sm:block">President Workspace</p>
 
               </div>
 
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+
+              <span className="hidden items-center gap-1.5 rounded-full bg-emerald-400/15 px-3 py-1 text-[11px] font-semibold text-emerald-200 ring-1 ring-inset ring-emerald-300/30 sm:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300"/>Final signatory</span>
+
+              <button type="button" onClick={handleLogout} disabled={loggingOut} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white/10 px-3 text-xs font-semibold text-white ring-1 ring-inset ring-white/20 backdrop-blur transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60" aria-label="Log out of President Workspace">
+
+                <FaSignOutAlt size={13} /> <span className="hidden sm:inline">{loggingOut ? "Logging out..." : "Logout"}</span>
+
+              </button>
+
+            </div>
+
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-5 sm:px-6">
+          <div className="relative flex flex-col gap-4 px-4 py-6 sm:flex-row sm:items-end sm:justify-between sm:px-6 sm:py-7">
 
-            <div><p className="text-[11px] font-semibold uppercase tracking-widest text-indigo-600">Clearance Management</p>
+            <div>
 
-              <h1 className="mt-1 text-xl font-bold tracking-tight sm:text-2xl">President's Review Desk</h1>
+              <p className="text-xs font-medium text-blue-200/80">Clearance management</p>
 
-              <p className="mt-1 text-xs text-slate-500">Final approvals and organized student clearance records</p></div>
+              <h1 className="mt-1 text-2xl font-bold tracking-tight text-white sm:text-3xl">President's Review Desk</h1>
 
-            <button type="button" onClick={loadDashboard} disabled={loading} className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-50"><FaSyncAlt className={loading ? "animate-spin" : ""}/>{loading ? "Refreshing" : "Refresh data"}</button>
+              <p className="mt-1.5 max-w-xl text-sm text-blue-100/80">Final approvals and organized student clearance records</p>
+
+            </div>
+
+            <button type="button" onClick={loadDashboard} disabled={loading} className="inline-flex h-10 items-center justify-center gap-2 self-start rounded-lg bg-white px-4 text-xs font-semibold text-[#082a70] shadow-sm transition hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 disabled:opacity-60 sm:self-auto"><FaSyncAlt className={loading ? "animate-spin" : ""}/>{loading ? "Refreshing" : "Refresh data"}</button>
 
           </div>
 
         </motion.header>
 
-        {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
+        {error && <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"><span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-rose-500"/><span>{error}</span></div>}
 
-        <section aria-label="Overview" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <section aria-label="Overview" className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
 
-          {[
+          {overview.map((item, i) => <motion.div key={item.label} initial={reducedMotion ? false : { opacity: 0, y: 7 }} animate={{ opacity: 1, y: 0 }} transition={{ ...animation, delay: reducedMotion ? 0 : i * 0.035 }} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
 
-            { label: "All Students", value: students.length, icon: FaUsers },
+            <div className="flex items-start justify-between gap-2">
 
-            { label: "Ready for Approval", value: readyCount, icon: FaCheckCircle },
+              <span className="text-xs font-medium leading-snug text-slate-500 sm:text-sm">{item.label}</span>
 
-            { label: "Completed", value: completedCount, icon: FaClipboardList },
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg sm:h-9 sm:w-9 ${item.tone}`}><item.icon size={14}/></span>
 
-            { label: "Not Submitted", value: students.filter((s) => s.status === "Not Submitted").length, icon: FaClock },
+            </div>
 
-          ].map((item, i) => <motion.div key={item.label} initial={reducedMotion ? false : { opacity: 0, y: 7 }} animate={{ opacity: 1, y: 0 }} transition={{ ...animation, delay: reducedMotion ? 0 : i * 0.035 }} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-
-            <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-slate-500">{item.label}</span><item.icon size={14} className="text-indigo-500"/></div>
-
-            {loading ? <div className="mt-2 h-7 w-12 animate-pulse rounded bg-slate-100"/> : <p className="mt-1 text-2xl font-bold tabular-nums">{item.value}</p>}
+            {loading ? <div className="mt-3 h-8 w-14 animate-pulse rounded bg-slate-100"/> : <p className="mt-3 text-2xl font-bold tracking-tight tabular-nums text-slate-900 sm:text-3xl">{item.value}</p>}
 
           </motion.div>)}
 
@@ -601,50 +705,67 @@ function PresidentDashboard() {
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="Student clearance directory">
 
-          <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
+          <div className="space-y-4 border-b border-slate-100 px-4 py-4 sm:px-6 sm:py-5">
 
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 
-              <div><h2 className="text-sm font-bold">Student clearance directory</h2><p className="mt-1 text-xs text-slate-500">Select a view to manage student clearance records</p></div>
+              <div><h2 className="text-base font-bold text-slate-900">Student clearance directory</h2><p className="mt-0.5 text-xs text-slate-500 sm:text-sm">Select a view to manage student clearance records</p></div>
 
-              <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" role="group" aria-label="Student view">
+              <div className="flex w-full gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 lg:w-auto" role="group" aria-label="Student view">
 
-                <button type="button" aria-pressed={view === "ready"} onClick={() => switchView("ready")} className={`rounded-md px-3 py-2 text-xs font-semibold transition ${view === "ready" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>Ready for Approval <span className="ml-1 tabular-nums">{readyCount}</span></button>
+                <button type="button" aria-pressed={view === "ready"} onClick={() => switchView("ready")} className={tabClass(view === "ready")}>Ready for Approval <span className={tabCount(view === "ready")}>{readyCount}</span></button>
 
-                <button type="button" aria-pressed={view === "completed"} onClick={() => switchView("completed")} className={`rounded-md px-3 py-2 text-xs font-semibold transition ${view === "completed" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>Completed <span className="ml-1 tabular-nums">{completedCount}</span></button>
-                  <button type="button" aria-pressed={view === "all"} onClick={() => switchView("all")} className={`rounded-md px-3 py-2 text-xs font-semibold transition ${view === "all" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>All Students</button>
+                <button type="button" aria-pressed={view === "completed"} onClick={() => switchView("completed")} className={tabClass(view === "completed")}>Completed <span className={tabCount(view === "completed")}>{completedCount}</span></button>
+
+                <button type="button" aria-pressed={view === "all"} onClick={() => switchView("all")} className={tabClass(view === "all")}>All Students</button>
 
               </div>
 
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
 
-              {view === "all" && <select aria-label="Filter by clearance status" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setCourse(""); setYear(""); setBlock(""); }} className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-600 outline-none focus:border-indigo-400"><option value="all">All statuses</option><option value="Not Submitted">Not submitted</option><option value="In Progress">In progress</option><option value="Ready">Ready</option><option value="Completed">Completed</option><option value="Needs Review">Needs review</option></select>}
+              <div className="relative flex-1 sm:max-w-sm">
 
-              <input value={search} onChange={(e) => { setSearch(e.target.value); setCourse(""); setYear(""); setBlock(""); }} placeholder="Search student, course or ID..." aria-label="Search students" className="h-9 min-w-[190px] flex-1 rounded-lg border border-slate-200 px-3 text-xs outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 sm:max-w-xs"/>
+                <FaSearch aria-hidden="true" size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
 
-              {view === "all" && <span className="text-xs text-slate-400">{filtered.length} students</span>}
+                <input value={search} onChange={(e) => { setSearch(e.target.value); setCourse(""); setYear(""); setBlock(""); }} placeholder="Search student, course or ID..." aria-label="Search students" className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-[#082a70] focus:bg-white focus:ring-2 focus:ring-[#082a70]/15"/>
+
+              </div>
+
+              {view === "all" && <select aria-label="Filter by clearance status" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setCourse(""); setYear(""); setBlock(""); }} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 outline-none transition focus:border-[#082a70] focus:ring-2 focus:ring-[#082a70]/15"><option value="all">All statuses</option><option value="Not Submitted">Not submitted</option><option value="In Progress">In progress</option><option value="Ready">Ready</option><option value="Completed">Completed</option><option value="Needs Review">Needs review</option></select>}
+
+              {view === "all" && <span className="text-xs font-medium text-slate-500 sm:ml-auto">{filtered.length} students</span>}
 
             </div>
 
           </div>
 
-          {loading ? <div className="space-y-3 p-5">{[0, 1, 2].map((i) => <div key={i} className="h-12 animate-pulse rounded-lg bg-slate-100"/>)}</div> : (
+          {loading ? <div className="space-y-3 p-4 sm:p-6">{[0, 1, 2].map((i) => <div key={i} className="h-14 animate-pulse rounded-xl bg-slate-100"/>)}</div> : (
 
             <AnimatePresence mode="wait" initial={false}>
 
               {view === "ready" || view === "completed" ? (
 
-                <motion.div key={view} initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={animation} className="p-4 sm:p-5">
+                <motion.div key={view} initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={animation} className="p-3 sm:p-6">
 
-                  {(view === "ready" ? readyBatches : completedBatches).length === 0 ? <div className="py-14 text-center"><FaCheckCircle className="mx-auto mb-3 text-slate-300" size={26}/><p className="text-sm font-semibold text-slate-700">{view === "ready" ? "No students ready for approval yet" : "No completed students yet"}</p><p className="mt-1 text-xs text-slate-500">{view === "ready" ? "Open All Students to check clearance progress." : "Completed approvals will appear here."}</p></div> :
+                  {activeBatches.length === 0 ? <div className="flex flex-col items-center py-14 text-center"><span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400"><FaCheckCircle size={20}/></span><p className="text-sm font-semibold text-slate-700">{view === "ready" ? "No students ready for approval yet" : "No completed students yet"}</p><p className="mt-1 max-w-xs text-xs text-slate-500">{view === "ready" ? "Open All Students to check clearance progress." : "Completed approvals will appear here."}</p></div> :
 
-                    <div className="space-y-3">{(view === "ready" ? readyBatches : completedBatches).map((batch) => <div key={batch.key} className="overflow-hidden rounded-xl border border-slate-200">
+                    <div className="space-y-4">{activeBatches.map((batch) => <div key={batch.key} className="overflow-hidden rounded-xl border border-slate-200 shadow-sm">
 
-                      <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-4 py-3"><div><p className="text-xs font-bold text-slate-800">{batch.course} · {batch.year} · {blockLabel(batch.block)}</p><p className="mt-1 text-[11px] text-slate-500">{batch.semester} · {batch.schoolYear} · {batch.students.length} {view === "ready" ? "ready" : "completed"}</p></div>
+                      <div className="flex flex-col gap-3 bg-gradient-to-r from-slate-50 to-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
 
-                        <button type="button" onClick={() => openBatch(batch)} className="rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:ring-2 focus-visible:ring-indigo-500">{view === "ready" ? "Review batch →" : "View batch details →"}</button></div>
+                        <div className="min-w-0">
+
+                          <p className="text-sm font-bold text-slate-800">{batch.course} · {batch.year} · {blockLabel(batch.block)}</p>
+
+                          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500"><span>{batch.semester} · {batch.schoolYear}</span><span className="inline-flex items-center rounded-full bg-[#082a70]/10 px-2 py-0.5 font-semibold text-[#082a70]">{batch.students.length} {batchLabel}</span></p>
+
+                        </div>
+
+                        <button type="button" onClick={() => openBatch(batch)} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#082a70] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#061b51] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#082a70]/50 focus-visible:ring-offset-2">{view === "ready" ? "Review batch" : "View batch details"}<FaChevronRight size={10}/></button>
+
+                      </div>
 
                       {studentTable(batch.students)}
 
@@ -654,21 +775,31 @@ function PresidentDashboard() {
 
               ) : (
 
-                <motion.div key="all" initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={animation} className="space-y-5 p-4 sm:p-5">
+                <motion.div key="all" initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={animation} className="space-y-6 p-4 sm:p-6">
 
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500"><span className="font-semibold text-indigo-700">Course</span><span>›</span><span className={course ? "font-semibold text-indigo-700" : ""}>Year Level</span><span>›</span><span className={year ? "font-semibold text-indigo-700" : ""}>Block</span><span>›</span><span>Students</span></div>
+                  <nav aria-label="Browse steps" className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
 
-                  <div><p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">1. Select Course</p><div className="flex flex-wrap gap-2">{courses.map((value) => filterButton(value, course === value, () => { setCourse(value); setYear(""); setBlock(""); }, filtered.filter((s) => s.course === value).length))}</div></div>
+                    <span className="font-semibold text-[#082a70]">Course</span><FaChevronRight size={8}/>
 
-                  {course && <motion.div initial={reducedMotion ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={animation}><p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">2. Select Year Level</p><div className="flex flex-wrap gap-2">{years.map((value) => filterButton(value, year === value, () => { setYear(value); setBlock(""); }, courseStudents.filter((s) => s.year === value).length))}</div></motion.div>}
+                    <span className={course ? "font-semibold text-[#082a70]" : ""}>Year level</span><FaChevronRight size={8}/>
 
-                  {course && year && <motion.div initial={reducedMotion ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={animation}><p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">3. Select Block</p><div className="flex flex-wrap gap-2">{blocks.map((value) => filterButton(blockLabel(value), block === value, () => setBlock(value), yearStudents.filter((s) => s.block === value).length))}</div></motion.div>}
+                    <span className={year ? "font-semibold text-[#082a70]" : ""}>Block</span><FaChevronRight size={8}/>
 
-                  {course && year && block && <motion.div initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={animation} className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-bold text-slate-800">{course} · {year} · {blockLabel(block)}</h3><p className="mt-1 text-xs text-slate-500">{blockStudents.length} students · Clearance progress and status</p></div><button type="button" onClick={() => setBlock("")} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"><FaArrowLeft size={10}/> Change block</button></div>{studentTable(blockStudents, true)}<p className="text-xs text-slate-400">To approve eligible students, switch to Ready for Approval and open their batch.</p></motion.div>}
+                    <span className={block ? "font-semibold text-[#082a70]" : ""}>Students</span>
+
+                  </nav>
+
+                  <div><p className="mb-2.5 text-sm font-semibold text-slate-700">Select a course</p><div className="flex flex-wrap gap-2">{courses.map((value) => filterButton(value, course === value, () => { setCourse(value); setYear(""); setBlock(""); }, filtered.filter((s) => s.course === value).length))}</div></div>
+
+                  {course && <motion.div initial={reducedMotion ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={animation}><p className="mb-2.5 text-sm font-semibold text-slate-700">Select a year level</p><div className="flex flex-wrap gap-2">{years.map((value) => filterButton(value, year === value, () => { setYear(value); setBlock(""); }, courseStudents.filter((s) => s.year === value).length))}</div></motion.div>}
+
+                  {course && year && <motion.div initial={reducedMotion ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={animation}><p className="mb-2.5 text-sm font-semibold text-slate-700">Select a block</p><div className="flex flex-wrap gap-2">{blocks.map((value) => filterButton(blockLabel(value), block === value, () => setBlock(value), yearStudents.filter((s) => s.block === value).length))}</div></motion.div>}
+
+                  {course && year && block && <motion.div initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={animation} className="space-y-3"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h3 className="text-sm font-bold text-slate-800 sm:text-base">{course} · {year} · {blockLabel(block)}</h3><p className="mt-0.5 text-xs text-slate-500">{blockStudents.length} students · Clearance progress and status</p></div><button type="button" onClick={() => setBlock("")} className="inline-flex h-9 items-center justify-center gap-2 self-start rounded-lg border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#082a70]/40 sm:self-auto"><FaArrowLeft size={10}/> Change block</button></div><div className="overflow-hidden rounded-xl border border-slate-200">{studentTable(blockStudents, true)}</div><p className="text-xs text-slate-400">To approve eligible students, switch to Ready for Approval and open their batch.</p></motion.div>}
 
                   {courses.length === 0 && <p className="py-8 text-center text-sm text-slate-500">No students match your filters.</p>}
 
-                  {courses.length > 0 && !course && <p className="rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-500">Choose a course above to browse its year levels and blocks.</p>}
+                  {courses.length > 0 && !course && <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">Choose a course above to browse its year levels and blocks.</p>}
 
                 </motion.div>
 
@@ -680,7 +811,7 @@ function PresidentDashboard() {
 
         </section>
 
-        <p className="text-[11px] text-slate-400">Final approval is available only after all other signatories have approved. Server-side validation remains enforced.</p>
+        <p className="px-1 text-[11px] leading-relaxed text-slate-400">Final approval is available only after all other signatories have approved. Server-side validation remains enforced.</p>
 
       </div>
 
